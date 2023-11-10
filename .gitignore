@@ -1,0 +1,10 @@
+build/
+dist/
+venv*/
+.idea/
+**/.idea
+__pycache__
+.json
+.package
+*.egg-info
+.DS_Store
