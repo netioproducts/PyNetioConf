@@ -9,7 +9,8 @@ This module is currently under development and is not ready for production use. 
 happening with relative frequency until the official release. The module is tested internally and should work
 correctly, but should still be considered alpha release.
 
-Currently, the module supports ESP devices running the 4.0.x firmware and basic socket on/off operations on NETIO 4
+Currently, the module supports ESP devices running the 2.x.x through 4.x.x firmware versions and basic socket on/off
+operations on NETIO 4
 devices.
 
 ## Installation
@@ -43,4 +44,6 @@ documentation will be provided when the API stabilizes in future releases.
 
 ## Issues and Suggestions
 
-If you find a bug or an issue, or have a suggestion, please use the GitHub issue tracker and create a new issue, before doing so, check if your issue isn't listed already. If reporting a bug please turn on logging DEBUG level and include the output in the report.
+If you find a bug or an issue, or have a suggestion, please use the GitHub issue tracker and create a new issue, before
+doing so, check if your issue isn't listed already. If reporting a bug please turn on logging DEBUG level and include
+the output in the report.
