@@ -1,12 +1,12 @@
 """
-Implementation specifics for ESP devices with the firmware 4.0.x.
+Implementation specifics for ESP devices with the firmware 3.x.x.
 """
-from .ESP300Device import ESP300Device
+from .ESP200Device import ESP200Device
 
 
-class ESP400Device(ESP300Device):
+class ESP300Device(ESP200Device):
     """
-    A class to control ESP devices with the firmware 4.0.x.
+    A class to control ESP devices with the firmware 3.x.x.
     """
 
     def __init__(self, host: str, username: str, password: str, sn_number: str, hostname: str, keep_alive: bool = True):

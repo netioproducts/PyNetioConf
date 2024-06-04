@@ -9,7 +9,7 @@ from xml.etree import ElementTree as ET  # noqa
 import requests
 
 from . import NETIODevice
-from .ESPCore import ESP400Device
+from .ESPCore import ESP200Device, ESP300Device, ESP400Device
 from .N4Core import N4Device, n4_api
 from .exceptions import *
 
@@ -61,8 +61,16 @@ class NetioManager:
             if device.sn_number == device_sn:
                 return device
 
-        if fw_version[0] < 4:
-            raise FirmwareVersionNotSupported("Firmware version not supported, please upgrade to fw 4.0.x or newer.")
+        if fw_version[0] < 2:
+            raise FirmwareVersionNotSupported("Firmware version not supported, please upgrade to fw 2.x.x or newer.")
+
+        if fw_version[0] == 2:
+            netio_device = ESP200Device(host, username, password, device_sn, hostname, keep_alive)
+            return netio_device
+
+        if fw_version[0] == 3:
+            netio_device = ESP300Device(host, username, password, device_sn, hostname, keep_alive)
+            return netio_device
 
         if fw_version[0] == 4:
             netio_device = ESP400Device(host, username, password, device_sn, hostname, keep_alive)
