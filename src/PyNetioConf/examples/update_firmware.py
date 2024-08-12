@@ -18,8 +18,7 @@ print(netio_device.get_output_states())
 print(netio_device.get_version_detailed())
 
 # Now that we know the device is connected and alive, we can upgrade the firmware
-# FIRMWARE_PATH = "/path/to/firmware/file.package"
-FIRMWARE_PATH = "/Users/ekkomaru/Downloads/firmware-1351_amazon_AWS_support-b5842cec/bin/esp32-5.0.3-b5842cec+1.55-mcu-output-restart.package"
+FIRMWARE_PATH = "/path/to/firmware/file.package"
 
 # Note this operation can take considerable time, even over 5 minutes in some cases
 with open(FIRMWARE_PATH, "rb") as fw_file:
