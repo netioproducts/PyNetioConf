@@ -9,7 +9,7 @@ from xml.etree import ElementTree as ET  # noqa
 import requests
 
 from . import NETIODevice
-from .ESPCore import ESP200Device, ESP300Device, ESP400Device
+from .ESPCore import ESP400Device, ESP500Device
 from .N4Core import N4Device, n4_api
 from .exceptions import *
 
@@ -32,7 +32,7 @@ class NetioManager:
             if device.session_id != '':
                 device.logout()
 
-    def assign_esp_device(self, host: str, username: str, password: str, keep_alive: bool) -> NETIODevice:
+    def assign_esp_device(self, host: str, username: str, password: str, keep_alive: bool, use_https: bool = False) -> NETIODevice:
         """
         Creates a NETIODevice object based on the platform of the connected device. Supports EPS 4.0.x firmware.
         Parameters
@@ -61,19 +61,15 @@ class NetioManager:
             if device.sn_number == device_sn:
                 return device
 
-        if fw_version[0] < 2:
-            raise FirmwareVersionNotSupported("Firmware version not supported, please upgrade to fw 2.x.x or newer.")
-
-        if fw_version[0] == 2:
-            netio_device = ESP200Device(host, username, password, device_sn, hostname, keep_alive)
-            return netio_device
-
-        if fw_version[0] == 3:
-            netio_device = ESP300Device(host, username, password, device_sn, hostname, keep_alive)
-            return netio_device
+        if fw_version[0] < 4:
+            raise FirmwareVersionNotSupported("Firmware version not supported, please upgrade to fw 4.0.x or newer.")
 
         if fw_version[0] == 4:
             netio_device = ESP400Device(host, username, password, device_sn, hostname, keep_alive)
+            return netio_device
+
+        if fw_version[0] == 5:
+            netio_device = ESP500Device(host, username, password, device_sn, hostname, keep_alive, use_https)
             return netio_device
 
     def assign_n4_device(self, host: str, username: str, password: str, keep_alive: bool) -> NETIODevice:
@@ -109,7 +105,7 @@ class NetioManager:
         netio_device = N4Device(host, username, password, device_sn, hostname, keep_alive)
         return netio_device
 
-    def init_device(self, host: str, username: str, password: str, keep_alive: bool = True) -> NETIODevice:
+    def init_device(self, host: str, username: str, password: str, keep_alive: bool = True, use_https: bool = False) -> NETIODevice:
         """
             Initialize a Netio device object, create a connection to the device, get its platform type and return
             an object based on that platform.
@@ -124,6 +120,9 @@ class NetioManager:
                 Password for the user.
             keep_alive: bool
                 If True, the connection will be kept alive by sending a keep alive packet every 30 seconds.
+            use_https: bool
+                Makes the communication with the device based on HTTPs, the protocol must be enabled on the device
+                in the security settings.
 
             Returns
             -------

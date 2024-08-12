@@ -123,7 +123,7 @@ class N4Device(NETIODevice):
     def get_outputs_data(self) -> List[Dict]:
         raise DeviceNotYetSupported("This device is not yet supported, support coming in future versions.")
 
-    def get_socket_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> List[Tuple[int, bool]]:
         xml_get_output_data_request = (f'<request sessionID="{self.session_id}">'
                                        f'<device action="get"><selector><name>system</name>'
                                        f'</selector><sections><digitalOutputs/><variables/></sections></device>'

@@ -36,6 +36,10 @@ def send_request(fw_object: ESPDevice, command: str, data: dict = None, timeout:
     -------
         A response from the api request in the `requests.Response` format.
     """
+    try:
+        protocol = "https" if fw_object.use_https else "http"
+    except AttributeError:
+        protocol = "http"
     netio_host = f"http://{fw_object.host}/{endpoint}"
     if endpoint == 'api':
         json_payload = {"sessionId": fw_object.session_id, "action": command}  # better session id?
@@ -90,7 +94,11 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
     -------
         A response from the api request in the `requests.Response` format.
     """
-    netio_host = f"http://{fw_object.host}{url_path}"
+    try:
+        protocol = "https" if fw_object.use_https else "http"
+    except AttributeError:
+        protocol = "http"
+    netio_host = f"{protocol}://{fw_object.host}{url_path}"
 
     session = requests.Session()
     session.cookies.update({"sessionId": fw_object.session_id})
@@ -101,8 +109,18 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
             response = session.post(netio_host, files={"sessionId": (None, fw_object.session_id),
                                                        "data":      ("config.json", file, "application/json")},
                                     headers={"DNT": "1"})
-        else:
+        elif url_path == '/upload/firmware':
             logger.debug(f"Uploading firmware to {netio_host}")
+            response = session.post(url=netio_host, files={"file": file}, timeout=timeout)
+        elif "upload/ssl/" in url_path:
+            if "mqtt_client_key" in url_path:
+                filetype = "application/x-iwork-keynote-sffkey"
+            elif "mqtt_client_cert" in url_path or "mqtt_root_ca" in url_path:
+                filetype = "application/x-x509-ca-cert"
+            logger.debug(f"Uploading SSL certificate to {netio_host}")
+            response = session.post(url=netio_host, files={"file": ("file", file, filetype)}, timeout=timeout)
+        else:
+            logger.debug(f"Uploading generic file to {netio_host}")
             response = session.post(url=netio_host, files={"file": file}, timeout=timeout)
     except requests.exceptions.ConnectionError:
         logger.error(f"Cannot connect to device {fw_object.host}")
@@ -117,8 +135,21 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
                 response = session.post(netio_host, files={"sessionId": fw_object.session_id,
                                                            "data":      ("config.json", file, "application/json")},
                                         headers={"DNT": "1"})
-            else:
+            elif url_path == "/cfgimport":
+                logger.debug(f"Uploading config file to {netio_host}.")
+                response = session.post(netio_host, files={"file": ("config.json", file, "application/json")})
+            elif url_path == '/upload/firmware':
                 logger.debug(f"Uploading firmware to {netio_host}")
+                response = session.post(url=netio_host, files={"file": file}, timeout=timeout)
+            elif "upload/ssl/" in url_path:
+                if "mqtt_client_key" in url_path:
+                    filetype = "application/x-iwork-keynote-sffkey"
+                elif "mqtt_client_cert" in url_path or "mqtt_root_ca" in url_path:
+                    filetype = "application/x-x509-ca-cert"
+                logger.debug(f"Uploading SSL certificate to {netio_host}")
+                response = session.post(url=netio_host, files={"file": ("file", file, filetype)}, timeout=timeout)
+            else:
+                logger.debug(f"Uploading generic file to {netio_host}")
                 response = session.post(url=netio_host, files={"file": file}, timeout=timeout)
         except requests.exceptions.ConnectionError:
             logger.error(f"Cannot connect to device {fw_object.host}.")
@@ -147,6 +178,7 @@ def get_file(fw_object: ESPDevice, url_path: str, timeout: int = 600, ) -> reque
     -------
         A response from the api request in the `requests.Response` format.
     """
+    protocol = "https" if fw_object.use_https else "http"
     netio_host = f"http://{fw_object.host}{url_path}"
 
     session = requests.Session()

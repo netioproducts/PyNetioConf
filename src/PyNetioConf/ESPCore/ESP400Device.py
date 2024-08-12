@@ -1,10 +1,10 @@
 """
 Implementation specifics for ESP devices with the firmware 4.0.x.
 """
-from .ESP300Device import ESP300Device
+from .ESPDevice import ESPDevice
 
 
-class ESP400Device(ESP300Device):
+class ESP400Device(ESPDevice):
     """
     A class to control ESP devices with the firmware 4.0.x.
     """

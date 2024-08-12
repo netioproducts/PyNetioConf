@@ -1,0 +1,14 @@
+--- Verision 0.0.2 ---
+- Added base version of 5.0.x firmware support.
+  - Implemented new websocket protocol communication for the new firmware.
+    - The device now communicates with the updated protocol by default if possible.
+    - Importing and exporting configuration now uses this protocol by default.
+  - Many functions still fallback to the old API.
+  - During this transitional period, both connection types are active.
+  - Devices with 5.0.x firmware beta now support HTTPs over both communication types.
+  - Fixed device firmware occasionally not updating over Wi-Fi.
+- Added the ability to upload MQTT certificates to the device
+- Added support for MQTT configuration and connections to AWS IoT.
+- NetioManager now properly handles device versions and can create devices with HTTPs.
+- Added an example script to update firmware on a device.
+- Added an example script to connect a device to Amazon AWS.

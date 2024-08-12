@@ -2,8 +2,12 @@
 Module containing the base class for all NETIO devices. This module is not meant to be used directly, but rather
 extended by the device-specific classes.
 """
+
 from abc import ABC, abstractmethod
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+from xml.etree.ElementTree import Element
+
+from websocket import WebSocket
 
 
 class NETIODevice(ABC):
@@ -11,7 +15,16 @@ class NETIODevice(ABC):
     A base class for ESPDevices based on the 3.x.x firmware.
     """
 
-    def __init__(self, host: str, username: str, password: str, sn_number: str, hostname: str, keep_alive: bool = True):
+    def __init__(
+            self,
+            host: str,
+            username: str,
+            password: str,
+            sn_number: str,
+            hostname: str,
+            keep_alive: bool = True,
+            **kwargs
+    ):
         self.host = host
         self.username = username
         self.password = password
@@ -23,6 +36,8 @@ class NETIODevice(ABC):
         self.user_permissions = list()
         self._keep_alive_flag = keep_alive
         self._ka_thread = None
+        self.ws: Optional[WebSocket] = None
+        self.ws_req_id = 0
 
     # region Session
     @abstractmethod
@@ -197,7 +212,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_socket_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> List[Tuple[int, bool]]:
         """
         Generates a list of the socket states currently on the device.
 
@@ -244,8 +259,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_wifi_static_address(self, address: str, net_mask: str, gateway: str, dns_server: str,
-                                hostname: str) -> None:
+    def set_wifi_static_address(
+            self, address: str, net_mask: str, gateway: str, dns_server: str, hostname: str
+    ) -> None:
         """
         Sets the device static address on the currently connected Wi-Fi network. All the arguments are required.
 
@@ -359,7 +375,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def change_user_password(self, username: str, old_password: str, new_password: str) -> None:
+    def change_user_password(
+            self, username: str, old_password: str, new_password: str
+    ) -> None:
         """
         Change the administrator password. Requires you to be logged in as administrator.
 
@@ -467,7 +485,9 @@ class NETIODevice(ABC):
 
     # region URLAPI
     @abstractmethod
-    def set_urlapi_state(self, protocol_enabled: bool, write_enable: bool, write_auth: Tuple[str, str]) -> None:
+    def set_urlapi_state(
+            self, protocol_enabled: bool, write_enable: bool, write_auth: Tuple[str, str]
+    ) -> None:
         """
         Configures the modbus M2M protocol with the provided parameters.
 
@@ -497,8 +517,14 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_modbus_state(self, protocol_enabled: bool, port: int,
-                         ip_filter_enabled: bool, ip_from: str, ip_to: str) -> None:
+    def set_modbus_state(
+            self,
+            protocol_enabled: bool,
+            port: int,
+            ip_filter_enabled: bool,
+            ip_from: str,
+            ip_to: str,
+    ) -> None:
         """
         Configures the modbus M2M protocol with the provided parameters.
 
@@ -532,8 +558,14 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_json_api_state(self, protocol_enabled: bool, read_enable: bool, write_enable: bool,
-                           read_auth: Tuple[str, str], write_auth: Tuple[str, str]) -> None:
+    def set_json_api_state(
+            self,
+            protocol_enabled: bool,
+            read_enable: bool,
+            write_enable: bool,
+            read_auth: Tuple[str, str],
+            write_auth: Tuple[str, str],
+    ) -> None:
         """
         Function for configuring the JSON M2M on the device. All parameters are required and will be set to the ones
         provided.
@@ -579,8 +611,14 @@ class NETIODevice(ABC):
 
     # region XML
     @abstractmethod
-    def set_xml_api_state(self, protocol_enabled: bool, read_enable: bool, write_enable: bool,
-                          read_auth: Tuple[str, str], write_auth: Tuple[str, str]) -> None:
+    def set_xml_api_state(
+            self,
+            protocol_enabled: bool,
+            read_enable: bool,
+            write_enable: bool,
+            read_auth: Tuple[str, str],
+            write_auth: Tuple[str, str],
+    ) -> None:
         """
         Function for configuring the XML M2M on the device. All parameters are required and will be set to the ones
         provided.
@@ -607,7 +645,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_xml(self, xml_auth: Tuple[str, str]):
+    def get_xml(self, xml_auth: Tuple[str, str]) -> Element:
         """
         Gets the XML information from the device. This contains full information about the device.
 
