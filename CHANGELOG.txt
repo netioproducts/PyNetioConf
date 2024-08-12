@@ -1,4 +1,9 @@
+--- Version 0.0.2.1 ---
+- Added missing docstrings for MQTT methods.
+- Fixed misleading method parameters for client key and cert.
+
 --- Verision 0.0.2 ---
+
 - Added base version of 5.0.x firmware support.
   - Implemented new websocket protocol communication for the new firmware.
     - The device now communicates with the updated protocol by default if possible.

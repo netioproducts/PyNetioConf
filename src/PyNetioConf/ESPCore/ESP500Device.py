@@ -71,20 +71,20 @@ class ESP500Device(ESP400Device):
 
         ws_api.send_request(self, "SET", "protocols/json/config", protocol_data)
 
-    def get_socket_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> List[Tuple[int, bool]]:
         socket_list = ws_api.send_request(self, "UNSUBSCRIBE", "outputs/measure")
         return [(socket["id"], socket["state"] == "on") for socket in socket_list["data"]["items"]]
 
     def get_measurement(self):
         return ws_api.send_request(self, "UNSUBSCRIBE", "outputs/measure")
 
-    def upload_mqtt_client_key(self, cert: str) -> None:
+    def upload_mqtt_client_key(self, key: str) -> None:
         ws_api.send_request(self, "SET", "protocols/mqtt/clientkeyupload", {})
-        response = esp_api.send_file(self, "/upload/ssl/mqtt_client_key.pem", cert)
+        response = esp_api.send_file(self, "/upload/ssl/mqtt_client_key.pem", key)
 
-    def upload_mqtt_client_certificate(self, key: str) -> None:
+    def upload_mqtt_client_certificate(self, cert: str) -> None:
         ws_api.send_request(self, "SET", "protocols/mqtt/clientcertupload", {})
-        response = esp_api.send_file(self, "/upload/ssl/mqtt_client_cert.pem", key)
+        response = esp_api.send_file(self, "/upload/ssl/mqtt_client_cert.pem", cert)
 
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
         ws_api.send_request(self, "SET", "protocols/mqtt/cacertupload", {})

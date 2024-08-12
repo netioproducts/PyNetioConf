@@ -545,6 +545,77 @@ class NETIODevice(ABC):
 
     # endregion
 
+    # region MQTT
+
+    @abstractmethod
+    def upload_mqtt_client_key(self, key: str) -> None:
+        """
+        Upload a MQTT client private key to the device.
+
+        Parameters
+        ----------
+        key: str
+            The private key to upload to the device. 
+        """
+        pass
+
+    @abstractmethod
+    def upload_mqtt_client_certificate(self, cert: str) -> None:
+        """
+        Uploads the MQTT client certificate to the device.
+
+        Parameters
+        ----------
+        cert: str
+            The client certificate to upload to the device.
+        """
+        pass
+
+    @abstractmethod
+    def upload_mqtt_ca_certificate(self, ca: str) -> None:
+        """
+        Uploads the root CA certificate to the device.
+
+        Parameters
+        ----------
+        ca: str
+            The root CA certificate to upload.
+        """
+        pass
+
+    @abstractmethod
+    def get_mqttflex_state(self) -> Dict:
+        """
+        Gets the state of the MQTT Flex protocol currently set on the device.
+
+        Returns
+        -------
+            JSON/dict object containing the current state of MQTT Flex and its configuration.
+        """
+        pass
+
+    @abstractmethod
+    def set_mqttflex_state(self, state: bool, config: dict = None) -> None:
+        """
+        Sets the state and if provided configuration of the MQTT Flex protocol.
+
+        Enables or disables the protocol based on the state given. If a state is
+        given, but not configuration is given, the method will only apply changes
+        to the state and keep the configuration that is present on device.
+
+        Parameters
+        ----------
+        state: bool
+            A boolean to determine if the protocol should be enabled or disabled.
+        config: dict
+            A dict object containing the desired MQTT configuration to upload to the device.
+        """
+        pass
+
+
+
+    # endregion
+
     # region JSON
     @abstractmethod
     def get_json_api_state(self) -> Dict:
