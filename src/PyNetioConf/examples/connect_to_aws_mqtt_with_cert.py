@@ -43,6 +43,8 @@ netio_device.upload_mqtt_ca_certificate(root_ca)
 
 MQTT_BROKER = "mqtt.broker.address.com"
 
+# Please make sure that your configuration is valid, and that the clientid and topics match your policies
+# if you have any policies active on AWS.
 device_config = {
   "broker": {
     "clientid": "netio${DEVICE_SN}",
