@@ -4,11 +4,27 @@ This module contains functions for sending requests to the device's API on EPS b
 import logging
 
 import requests
-
+import time
 from PyNetioConf.exceptions import CommunicationError
 from . import ESPDevice
 
 logger = logging.getLogger(__name__)
+
+def check_connectivity(fw_object: ESPDevice, timeout: int = 60) -> float:
+    try:
+        protocol = "https" if fw_object.use_https else "http"
+    except AttributeError:
+        protocol = "http"
+
+    try:
+        logger.debug(f"Checking connection health of {fw_object.host}.")
+        response = requests.get(f"{protocol}://{fw_object.host}", timeout=timeout)
+    except:
+        logger.warn(f"Couldn't connect to device {fw_object.host}.")
+        return -1
+    
+    logger.debug(f"Response time of device {fw_object.host} is {response.elapsed.total_seconds() * 1000.0}ms.")
+    return response.elapsed.total_seconds()
 
 
 def send_request(fw_object: ESPDevice, command: str, data: dict = None, timeout: int = 60, endpoint: str = 'api',
@@ -118,7 +134,12 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
             elif "mqtt_client_cert" in url_path or "mqtt_root_ca" in url_path:
                 filetype = "application/x-x509-ca-cert"
             logger.debug(f"Uploading SSL certificate to {netio_host}")
-            response = session.post(url=netio_host, files={"file": ("file", file, filetype)}, timeout=timeout)
+            response = session.post(
+                    url=netio_host,
+                    files={"file": ("file", file, filetype)},
+                    headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
+                    timeout=timeout
+                )
         else:
             logger.debug(f"Uploading generic file to {netio_host}")
             response = session.post(url=netio_host, files={"file": file}, timeout=timeout)
@@ -126,9 +147,19 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
         logger.error(f"Cannot connect to device {fw_object.host}")
         raise CommunicationError("Cannot connect to device")
 
-    if response == 'failed':
+
+    try:
+        response_status: str = response.json()["status"]
+    except KeyError:
+        response_status = 'failed'
+    logger.debug(f"File upload status: {response_status}")
+
+    if response_status == 'failed':
         logger.error(f"Upload failed, logging out, retrying.")
-        fw_object.login(fw_object.username, fw_object.password, logout=True)
+        if check_connectivity(fw_object) != -1:
+            fw_object.login(fw_object.username, fw_object.password, logout=True)
+        else:
+            raise CommunicationError("Couldn't connect to device after a failed request.")
         try:
             if url_path == '/upload/config':
                 logger.debug(f"Uploading config file to {netio_host}.")
@@ -147,7 +178,12 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
                 elif "mqtt_client_cert" in url_path or "mqtt_root_ca" in url_path:
                     filetype = "application/x-x509-ca-cert"
                 logger.debug(f"Uploading SSL certificate to {netio_host}")
-                response = session.post(url=netio_host, files={"file": ("file", file, filetype)}, timeout=timeout)
+                response = session.post(
+                    url=netio_host,
+                    files={"file": ("file", file, filetype)},
+                    headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
+                    timeout=timeout
+                )
             else:
                 logger.debug(f"Uploading generic file to {netio_host}")
                 response = session.post(url=netio_host, files={"file": file}, timeout=timeout)

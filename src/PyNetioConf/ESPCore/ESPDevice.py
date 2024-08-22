@@ -281,13 +281,36 @@ class ESPDevice(NETIODevice):
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
-        esp_api.send_request(self, "prepFwUpgrade")
-        esp_api.send_file(self, "/upload/firmware", file)
-        esp_api.send_request(self, "startUpgrade", close=True)
+
+        pre_reconnect_wait = 20
+        if self.supported_features["wifi"] == "yes":
+            wifi_settings = self.get_wifi_settings()
+            if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
+                pre_reconnect_wait = 50
+        
+        if esp_api.check_connectivity(self) > (pre_reconnect_wait / 10.0):
+            pre_reconnect_wait = pre_reconnect_wait * 2
+
+        _ = esp_api.send_request(self, "prepFwUpgrade")
+        _ = esp_api.send_file(self, "/upload/firmware", file)
+        try:
+            _ = esp_api.send_request(self, "startUpgrade", close=True)
+        except CommunicationError:
+            self.logger.warn(f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection.")
+
         self.logger.debug(
             f"Uploaded firmware {file.name}, device {self.host} might be unresponsive for a while."
         )
-        sleep(10)
+        sleep(pre_reconnect_wait)
+
+        device_response_time = esp_api.check_connectivity(self)
+        retry_limit = 3 if device_response_time == -1 else 0
+        for _ in range(0, retry_limit):
+            device_response_time = esp_api.check_connectivity(self)
+
+        if device_response_time == -1:
+            raise CommunicationError("Device couldn't establish connection after firmware update.")
+
         self.login(self.username, self.password)
         if self._ka_thread:
             self._keep_alive()
@@ -620,3 +643,19 @@ class ESPDevice(NETIODevice):
             self.logout()
 
     # endregion
+
+
+    def get_mqttflex_state():
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.3 and newer.")
+
+    def set_mqttflex_state():
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.3 and newer.")
+
+    def upload_mqtt_ca_certificate():
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.3 and newer.")
+
+    def upload_mqtt_client_certificate():
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.3 and newer.")
+
+    def upload_mqtt_client_key():
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.3 and newer.")

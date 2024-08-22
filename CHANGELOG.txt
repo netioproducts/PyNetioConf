@@ -1,6 +1,21 @@
+--- Version 0.0.3 ---
+
+- Added connection checking capability to esp_api
+- Added network condition checking to firmware updates on ESPDevices
+  - Fixes device disconnects of firmware update on devices using Wi-Fi
+  - Fixes unresponsive devices after applying certain 5.0.x firmware versions
+  - Devices on poor connection networks now wait further for firmware updates
+- Fixed communication error during logging out devices after applying firmware update
+- Changed MQTT certificate upload path to dynamically load from ws_api responses
+  - Fixes MQTT AWS certificate not working in certain cases
+- Added error message to ConnectionError exception
+
+
 --- Version 0.0.2.1 ---
+
 - Added missing docstrings for MQTT methods.
 - Fixed misleading method parameters for client key and cert.
+
 
 --- Verision 0.0.2 ---
 

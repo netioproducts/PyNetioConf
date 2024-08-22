@@ -10,7 +10,9 @@ class ProtocolNotEnabled(NetioException):
 
 class CommunicationError(NetioException):
     """Raised when the connection to the Netio device fails"""
-    pass
+    def __init__(self, message: str, error: str = ""):
+        super().__init__(message)
+        self.error = error
 
 
 class AuthError(NetioException):

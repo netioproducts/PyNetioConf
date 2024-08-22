@@ -3,13 +3,14 @@ Implementation specifics for ESP devices with the firmware 5.0.x.
 """
 import json
 import ssl
-from typing import Dict, List, Tuple
 from time import sleep
+from typing import Dict, List, Tuple
 
 import websocket
 
+from . import esp_api, ws_api
+from ..exceptions import CommunicationError
 from .ESP400Device import ESP400Device
-from . import ws_api, esp_api
 
 
 class ESP500Device(ESP400Device):
@@ -79,16 +80,19 @@ class ESP500Device(ESP400Device):
         return ws_api.send_request(self, "UNSUBSCRIBE", "outputs/measure")
 
     def upload_mqtt_client_key(self, key: str) -> None:
-        ws_api.send_request(self, "SET", "protocols/mqtt/clientkeyupload", {})
-        response = esp_api.send_file(self, "/upload/ssl/mqtt_client_key.pem", key)
+        upload_path = ws_api.send_request(self, "SET", "protocols/mqtt/clientkeyupload", {})["data"]["uploadPath"]
+        response = esp_api.send_file(self, upload_path, key)
+        sleep(0.1)
 
     def upload_mqtt_client_certificate(self, cert: str) -> None:
-        ws_api.send_request(self, "SET", "protocols/mqtt/clientcertupload", {})
-        response = esp_api.send_file(self, "/upload/ssl/mqtt_client_cert.pem", cert)
+        upload_path = ws_api.send_request(self, "SET", "protocols/mqtt/clientcertupload", {})["data"]["uploadPath"]
+        response = esp_api.send_file(self, upload_path, cert)
+        sleep(0.1)
 
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
-        ws_api.send_request(self, "SET", "protocols/mqtt/cacertupload", {})
-        response = esp_api.send_file(self, "/upload/ssl/mqtt_root_ca.pem", ca)
+        upload_path = ws_api.send_request(self, "SET", "protocols/mqtt/cacertupload", {})["data"]["uploadPath"]
+        response = esp_api.send_file(self, upload_path, ca)
+        sleep(0.1)
 
     def get_mqttflex_state(self) -> dict:
         return ws_api.send_request(self, "UNSUBSCRIBE", "protocols/mqtt/config")['data']
@@ -97,6 +101,7 @@ class ESP500Device(ESP400Device):
         if config is None:
             config = self.get_mqttflex_state()["config"]
         ws_api.send_request(self, "SET", "protocols/mqtt/config", {"enable": state, "config": json.dumps(config)})
+        sleep(1)
 
     def export_config(self, save_file: str = None) -> Dict:
         config = ws_api.send_request(self, "SET", "system/cfgexport", data={})
@@ -136,16 +141,40 @@ class ESP500Device(ESP400Device):
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
-        esp_api.send_request(self, "prepFwUpgrade")
-        esp_api.send_file(self, "/upload/firmware", file)
-        esp_api.send_request(self, "startUpgrade", close=True)
+
+        pre_reconnect_wait = 20
+        if self.supported_features["wifi"] == "yes":
+            wifi_settings = self.get_wifi_settings()
+            if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
+                pre_reconnect_wait = 50
+                self.logger.debug(f"Increased wait time after fimrware update due to active Wi-Fi connection.")
+        
+        if esp_api.check_connectivity(self) > (pre_reconnect_wait / 10.0):
+            pre_reconnect_wait = pre_reconnect_wait * 2
+            self.logger.debug("Increased wait time after firmware update due to poor connection quality.")
+
+        _ = esp_api.send_request(self, "prepFwUpgrade")
+        _ = esp_api.send_file(self, "/upload/firmware", file)
+        try:
+            _ = esp_api.send_request(self, "startUpgrade", close=True)
+        except CommunicationError:
+            self.logger.warn(f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection.")
         self.logger.debug(
             f"Uploaded firmware {file.name}, device {self.host} might be unresponsive for a while."
         )
-        sleep(10)
+
+        sleep(pre_reconnect_wait)
+
+        self.logger.debug(f"Retrying connection to device {self.host} after updating firmware to {file.name}.")
+        device_response_time = esp_api.check_connectivity(self)
+        retry_limit = 3 if device_response_time == -1 else 0
+        for _ in range(0, retry_limit):
+            device_response_time = esp_api.check_connectivity(self)
+
+        if device_response_time == -1:
+            raise CommunicationError("Device couldn't establish connection after firmware update.")
+
         _ = self.login(self.username, self.password)
         _ = self._login_new(self.username, self.password)
         if self._ka_thread:
             self._keep_alive()
-
-
