@@ -8,10 +8,10 @@ from xml.etree import ElementTree as ET  # noqa
 
 import requests
 
-from . import NETIODevice
-from .ESPCore import ESP400Device, ESP500Device
+from .ESPCore import *
 from .N4Core import N4Device, n4_api
 from .exceptions import *
+from .netio_device import NETIODevice
 
 
 class NetioManager:
@@ -32,7 +32,8 @@ class NetioManager:
             if device.session_id != '':
                 device.logout()
 
-    def assign_esp_device(self, host: str, username: str, password: str, keep_alive: bool, use_https: bool = False) -> NETIODevice:
+    def assign_esp_device(self, host: str, username: str, password: str, keep_alive: bool,
+                          use_https: bool = False) -> NETIODevice:
         """
         Creates a NETIODevice object based on the platform of the connected device. Supports EPS 4.0.x firmware.
         Parameters
@@ -61,15 +62,23 @@ class NetioManager:
             if device.sn_number == device_sn:
                 return device
 
-        if fw_version[0] < 4:
-            raise FirmwareVersionNotSupported("Firmware version not supported, please upgrade to fw 4.0.x or newer.")
+        if fw_version[0] < 2:
+            raise FirmwareVersionNotSupported("Firmware version not supported, please upgrade to fw 2.x.x or newer.")
+
+        if fw_version[0] == 2:
+            netio_device = ESP200Device(host, username, password, device_sn, hostname, keep_alive, self, use_https)
+            return netio_device
+
+        if fw_version[0] == 3:
+            netio_device = ESP300Device(host, username, password, device_sn, hostname, keep_alive, self, use_https)
+            return netio_device
 
         if fw_version[0] == 4:
-            netio_device = ESP400Device(host, username, password, device_sn, hostname, keep_alive)
+            netio_device = ESP400Device(host, username, password, device_sn, hostname, keep_alive, self, use_https)
             return netio_device
 
         if fw_version[0] == 5:
-            netio_device = ESP500Device(host, username, password, device_sn, hostname, keep_alive, use_https)
+            netio_device = ESP500Device(host, username, password, device_sn, hostname, keep_alive, self, use_https)
             return netio_device
 
     def assign_n4_device(self, host: str, username: str, password: str, keep_alive: bool) -> NETIODevice:
@@ -105,7 +114,8 @@ class NetioManager:
         netio_device = N4Device(host, username, password, device_sn, hostname, keep_alive)
         return netio_device
 
-    def init_device(self, host: str, username: str, password: str, keep_alive: bool = True, use_https: bool = False) -> NETIODevice:
+    def init_device(self, host: str, username: str, password: str, keep_alive: bool = True,
+                    use_https: bool = False) -> NETIODevice:
         """
             Initialize a Netio device object, create a connection to the device, get its platform type and return
             an object based on that platform.
@@ -130,13 +140,35 @@ class NetioManager:
             """
         try:
             version_info = self.parse_fw_version(host)  # noqa
-            netio_device = self.assign_esp_device(host, username, password, keep_alive)
+            netio_device = self.assign_esp_device(host, username, password, keep_alive, use_https)
         except requests.exceptions.ConnectionError:
             version_info = self.parse_fw_version_n4(host)  # noqa
-            netio_device = self.assign_n4_device(host, username, password, keep_alive)
+            netio_device = self.assign_n4_device(host, username, password, keep_alive, use_https)
 
         self._connected_devices.append(netio_device)
         return netio_device
+
+    def update_device(self, netio_device: NETIODevice) -> NETIODevice:
+        """
+        Update the device object in the device list and return its new instance,
+        main use for updating firmware between major versions.
+
+        Parameters
+        ----------
+        netio_device: NETIODevice
+            The device object to update.
+
+        Returns
+        -------
+            The updated device object.
+        """
+        for index, device in enumerate(self._connected_devices):
+            if netio_device.sn_number == device.sn_number:
+                updated_device = self.init_device(device.host, device.username, device.password,
+                                                  device._keep_alive_flag, device.use_https)
+                self._connected_devices[index] = updated_device
+                return updated_device
+        raise CommunicationError("Device could not be reinstated after update.")
 
     @staticmethod
     def parse_fw_version(host: str) -> Tuple[int, int, int]:

@@ -1,17 +1,17 @@
-import hashlib
 import base64
+import hashlib
 import json
+import logging
 import math
 import random
-import logging
 from typing import Dict, Tuple
 
-from . import ESPDevice
+from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
 
 
-def send_request(device: ESPDevice, type: str, topic: str = None, data: Dict = None) -> Dict:
+def send_request(device: NETIODevice, type: str, topic: str = None, data: Dict = None) -> Dict:
     """
     Send a request to the device's websocket API and return the response.
     Parameters
@@ -66,7 +66,7 @@ def generate_auth_token(password_token: Tuple[str, str], local_timestamp) -> str
     return f"{password_token[0]}.{token_hash}"
 
 
-def login(device: ESPDevice, timestamp: int, public_key: str, username: str, password: str) -> Dict:
+def login(device: NETIODevice, timestamp: int, public_key: str, username: str, password: str) -> Dict:
     salt = generate_salt()
     password_hash = generate_password_hash(username, password, public_key)
     password_token = generate_password_token(salt, password_hash)

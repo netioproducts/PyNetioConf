@@ -9,8 +9,9 @@ from typing import Dict, List, Tuple
 import websocket
 
 from . import esp_api, ws_api
+from .esp_400_device import ESP400Device
+from .. import NetioManager
 from ..exceptions import CommunicationError
-from .ESP400Device import ESP400Device
 
 
 class ESP500Device(ESP400Device):
@@ -19,9 +20,9 @@ class ESP500Device(ESP400Device):
     """
 
     def __init__(self, host: str, username: str, password: str, sn_number: str, hostname: str,
-                 keep_alive: bool = True, use_https: bool = False):
+                 keep_alive: bool = True, netio_manager: NetioManager = None, use_https: bool = False):
         self.use_https = use_https
-        super().__init__(host, username, password, sn_number, hostname, keep_alive)
+        super().__init__(host, username, password, sn_number, hostname, keep_alive, netio_manager)
         self.fw_version = self.get_version()
         self._ssl_context = ssl.create_default_context()
         self._ssl_context.check_hostname = False
@@ -148,7 +149,7 @@ class ESP500Device(ESP400Device):
             if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
                 pre_reconnect_wait = 50
                 self.logger.debug(f"Increased wait time after fimrware update due to active Wi-Fi connection.")
-        
+
         if esp_api.check_connectivity(self) > (pre_reconnect_wait / 10.0):
             pre_reconnect_wait = pre_reconnect_wait * 2
             self.logger.debug("Increased wait time after firmware update due to poor connection quality.")
@@ -158,7 +159,8 @@ class ESP500Device(ESP400Device):
         try:
             _ = esp_api.send_request(self, "startUpgrade", close=True)
         except CommunicationError:
-            self.logger.warn(f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection.")
+            self.logger.warn(
+                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection.")
         self.logger.debug(
             f"Uploaded firmware {file.name}, device {self.host} might be unresponsive for a while."
         )
@@ -174,7 +176,6 @@ class ESP500Device(ESP400Device):
         if device_response_time == -1:
             raise CommunicationError("Device couldn't establish connection after firmware update.")
 
-        _ = self.login(self.username, self.password)
-        _ = self._login_new(self.username, self.password)
-        if self._ka_thread:
-            self._keep_alive()
+        updated_instance = self.netio_manager.update_device(self)
+
+        return updated_instance

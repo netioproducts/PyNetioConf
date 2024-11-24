@@ -4,13 +4,14 @@ This module contains functions for sending requests to the device's API on EPS b
 import logging
 
 import requests
-import time
-from PyNetioConf.exceptions import CommunicationError
-from . import ESPDevice
+
+from ..exceptions import CommunicationError
+from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
 
-def check_connectivity(fw_object: ESPDevice, timeout: int = 60) -> float:
+
+def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
     try:
         protocol = "https" if fw_object.use_https else "http"
     except AttributeError:
@@ -22,12 +23,12 @@ def check_connectivity(fw_object: ESPDevice, timeout: int = 60) -> float:
     except:
         logger.warn(f"Couldn't connect to device {fw_object.host}.")
         return -1
-    
+
     logger.debug(f"Response time of device {fw_object.host} is {response.elapsed.total_seconds() * 1000.0}ms.")
     return response.elapsed.total_seconds()
 
 
-def send_request(fw_object: ESPDevice, command: str, data: dict = None, timeout: int = 60, endpoint: str = 'api',
+def send_request(fw_object: NETIODevice, command: str, data: dict = None, timeout: int = 60, endpoint: str = 'api',
                  close: bool = False) -> requests.Response:
     """
     Send an HTTP request to the device's API and return a `requests.Response` object.
@@ -91,7 +92,7 @@ def send_request(fw_object: ESPDevice, command: str, data: dict = None, timeout:
     return response
 
 
-def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> requests.Response:
+def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -> requests.Response:
     """
     Upload a file to the device on the specified URL path, returns the response of the request.
 
@@ -135,11 +136,11 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
                 filetype = "application/x-x509-ca-cert"
             logger.debug(f"Uploading SSL certificate to {netio_host}")
             response = session.post(
-                    url=netio_host,
-                    files={"file": ("file", file, filetype)},
-                    headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
-                    timeout=timeout
-                )
+                url=netio_host,
+                files={"file": ("file", file, filetype)},
+                headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
+                timeout=timeout
+            )
         else:
             logger.debug(f"Uploading generic file to {netio_host}")
             response = session.post(url=netio_host, files={"file": file}, timeout=timeout)
@@ -147,11 +148,12 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
         logger.error(f"Cannot connect to device {fw_object.host}")
         raise CommunicationError("Cannot connect to device")
 
-
     try:
         response_status: str = response.json()["status"]
     except KeyError:
         response_status = 'failed'
+    except requests.exceptions.JSONDecodeError:
+        response_status = 'unknown'
     logger.debug(f"File upload status: {response_status}")
 
     if response_status == 'failed':
@@ -197,7 +199,7 @@ def send_file(fw_object: ESPDevice, url_path: str, file, timeout: int = 600) -> 
     return response
 
 
-def get_file(fw_object: ESPDevice, url_path: str, timeout: int = 600, ) -> requests.Response:
+def get_file(fw_object: NETIODevice, url_path: str, timeout: int = 600, ) -> requests.Response:
     """
     Download a file from the device on the specified URL path, returns the response of the request.
 

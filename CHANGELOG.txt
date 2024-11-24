@@ -1,3 +1,74 @@
+--- Version 0.1.0 ---
+- ! Updated firmware update functions to newly reflect the class of the firmware versions the device updates to.
+    - This changes the way device updates look in code, now you should assign the return value of `update_firmware()` to
+     your original object. Update firmware example has been updated to the new form.
+     - This change now makes it so devices keep track of the NetioManager instance they belong to.
+     - Adds an update_device(...) method to NetioManager, while use of this isn't encouraged since the device manages
+     itself when to update, if you know a device has been updated externally, you can use this to update its class
+     instead of initiating it anew.
+- Added a pre-made example script for upgrading multiple devices at a time.
+- Refactored naming schemes and package import structure to be more readable.
+    - Fixes some cyclical references and wrongly assigned hinting tips.
+    - Unified the constructors of all versions classes to follow the abstract class they derive from.
+- Continiued adding pre-emptive error checking and permission checking in various places.
+- Added ElementNotFound exception, raised when filtering list items fails.
+- Added InvalidParameterValueError exception, raised when setting invalid parameters in protocol/configuration methods.
+- Fixed a firmware update throwing exceptions on certain 4.0.x devices.
+- Fixed a bug that disallowed version 2.x.x and 3.x.x firmware devices from being assigned objects.
+- Fixed wrong checking of successfully setting protocols if the protocol was being disabled.
+- Added new methods to the ESP class devices, their documentation can be found in netio_device.py:
+    - set_output_schedule(...)
+    - set_output_schedule_by_name(...)
+    - get_output_schedule_id(...)
+    - get_output_schedule(...)
+    - set_output_schedule_state(...)
+    - set_system_settings(...)
+    - set_periodic_restart(...)
+    - locate()
+    - get_users()
+    - get_user_privileges(...)
+    - create_user(...)
+    - remove_user(...)
+    - get_telnet_api_state()
+    - set_telnet_api_state(...)
+    - get_netio_push_api_state()
+    - set_netio_push_api_state(...)
+    - netio_push_api_push_now()
+    - get_snmp_api_state()
+    - _set_snmp_api_state(...)
+    - set_snmp_v1_2_api_state(...)
+    - set_snmp_v3_api_state(...)
+    - get_rules()
+    - get_enabled_rules()
+    - get_disabled_rules()
+    - get_rule_by_name(...)
+    - get_watchdogs()
+    - get_enabled_watchdogs()
+    - get_disabled_watchdogs()
+    - get_watchdog_by_name(...)
+    - get_schedules()
+    - get_acive_schedules()
+    - get_schedule_by_name(...)
+    - get_schedule_id(...)
+    - get_schedule_names(...)
+    - delete_schedule(...)
+    - delete_schedule_by_name(...)
+    - get_system_info()
+    - get_uptime()
+    - reset_power_consumption_counters()
+    - get_system_log()
+    - clear_system_log()
+    - get_pabs()
+    - get_pab_by_name(...)
+    - get_enabled_pabs()
+    - get_disbled_pabs()
+- Updated required python version in the package config.
+- Updated licence to current year.
+- Updated readme to reflect changes in this verison and better explain the module to users.
+    - Added usage guide for non-developers with the pre-made scripts.
+    - Fixed language inconsistencies.
+    - Updated example and installation section.
+
 --- Version 0.0.3 ---
 
 - Added connection checking capability to esp_api

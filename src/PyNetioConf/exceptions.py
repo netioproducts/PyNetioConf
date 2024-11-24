@@ -10,6 +10,7 @@ class ProtocolNotEnabled(NetioException):
 
 class CommunicationError(NetioException):
     """Raised when the connection to the Netio device fails"""
+
     def __init__(self, message: str, error: str = ""):
         super().__init__(message)
         self.error = error
@@ -37,4 +38,14 @@ class DeviceNotYetSupported(NetioException):
 
 class InvalidSocketIndex(NetioException):
     """Raised when the socket index is invalid"""
+    pass
+
+
+class ElementNotFound(NetioException):
+    """Raised when looking for an element that doesn't exist on the device."""
+    pass
+
+
+class InvalidParameterValueError(NetioException):
+    """Raised when trying to set an invalid paremeter in protocol or configuration methods"""
     pass

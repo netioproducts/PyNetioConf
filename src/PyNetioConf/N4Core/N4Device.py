@@ -8,8 +8,8 @@ import threading
 from typing import Dict, List, Tuple
 
 from . import n4_api
-from .. import NETIODevice
 from ..exceptions import *
+from ..netio_device import NETIODevice
 
 
 class N4Device(NETIODevice):
