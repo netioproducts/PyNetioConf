@@ -232,7 +232,13 @@ class NetioManager:
         """
         session = requests.Session()
         json_payload = {"sessionId": "", "action": "getVersion"}
-        response = session.post(f"http://{host}/api", json=json_payload, timeout=300)  # noqa
+        from urllib3.exceptions import MaxRetryError
+        try:
+            response = session.post(f"http://{host}/api", json=json_payload, timeout=300)  # noqa
+        except MaxRetryError:
+            from time import sleep
+            sleep(5)
+            response = session.get(f"http://{host}/api", json=json_payload, timeout=300)
 
         if 'data' not in response.json():
             raise ConnectionError('Invalid response from device')
