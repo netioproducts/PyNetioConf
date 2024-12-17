@@ -118,7 +118,7 @@ class ESPDevice(NETIODevice):
     # region Sockets
     # region Socket Control
 
-    def get_ouput_state(self, output_id: int) -> bool:
+    def get_output_state(self, output_id: int) -> bool:
         self._check_socket_index(output_id)
         return self.get_output_states()[output_id][1]
 
