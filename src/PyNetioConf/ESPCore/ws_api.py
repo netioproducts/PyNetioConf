@@ -6,6 +6,7 @@ import math
 import random
 from typing import Dict, Tuple
 
+from PyNetioConf.exceptions import CommunicationError
 from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
@@ -35,11 +36,14 @@ def send_request(device: NETIODevice, type: str, topic: str = None, data: Dict =
     if data:
         request["data"] = data
     logger.debug(f"Sending request to {device.host} with payload {request}")
-    device.ws.send(json.dumps(request))
-    device.ws_req_id += 1
-    message = device.ws.recv()
-    logger.debug(f"Received response from {device.host} with payload {message}")
-    return json.loads(message)
+    try:
+        device.ws.send(json.dumps(request))
+        device.ws_req_id += 1
+        message = device.ws.recv()
+        logger.debug(f"Received response from {device.host} with payload {message}")
+        return json.loads(message)
+    except:
+        raise CommunicationError(f"Failed to send request to {device.host}")
 
 
 def generate_salt() -> str:

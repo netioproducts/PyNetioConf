@@ -1,4 +1,13 @@
+--- Version 0.1.1 ---
+
+- Fully transitioned the project to pyproject.toml configuration
+- Fixed a crash with use_https on 5.0.x devices
+- Minor version updates for 5.0.x
+- Added some lacking error checking
+- Added some missing debug messages
+
 --- Version 0.1.0 ---
+
 - ! Updated firmware update functions to newly reflect the class of the firmware versions the device updates to.
     - This changes the way device updates look in code, now you should assign the return value of `update_firmware()` to
      your original object. Update firmware example has been updated to the new form.

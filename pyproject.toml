@@ -1,3 +1,44 @@
+[project]
+name = "PyNetioConf"
+version = "0.1.1"
+requires-python = ">= 3.10"
+authors = [
+    { name = "NETIO products a.s.", email = "support@netio.eu" }
+]
+maintainers = [
+    { name = "Jakub Šperl", email = "jsperl@netio.eu" }
+]
+
+description = "Universal module to control and configure all NETIO device"
+readme = "README.md"
+license = { file = "LICENSE" }
+keywords = ["NETIO"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Development Status :: 3 - Alpha",
+]
+
+dependencies = [
+    "websocket-client",
+    "pyserial",
+    "requests",
+    "urllib3"
+]
+
+[project.urls]
+Homepage = "https://netio-products.com/"
+Repository = "https://github.com/netioproducts/PyNetioConf"
+Issues = "https://github.com/netioproducts/PyNetioConf/issues"
+Chanegelog = "https://github.com/netioproducts/PyNetioConf/blob/main/CHANGELOG.txt"
+
 [build-system]
-requires = ["setuptools", "wheel", "websocket-client"]
+requires = ["setuptools >= 70.0"]
 build-backend = "setuptools.build_meta"

@@ -43,6 +43,10 @@ class NETIODevice(ABC):
         self.ws: Optional[WebSocket] = None
         self.ws_req_id = 0
         self.use_https = use_https
+        if use_https:
+            from urllib3 import disable_warnings
+            from urllib3.exceptions import InsecureRequestWarning
+            disable_warnings(category=InsecureRequestWarning)
 
         # Keep an instace of NetioManager for updating device classes during
         # firmware updates.

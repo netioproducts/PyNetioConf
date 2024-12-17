@@ -1060,11 +1060,11 @@ class ESPDevice(NETIODevice):
     def set_mqttflex_state(self, state: bool, config: dict | None = None) -> None:
         raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
-    def upload_mqtt_ca_certificate(self) -> None:
+    def upload_mqtt_ca_certificate(self, ca: str) -> None:
         raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
-    def upload_mqtt_client_certificate(self) -> None:
+    def upload_mqtt_client_certificate(self, cert: str) -> None:
         raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
-    def upload_mqtt_client_key(self) -> None:
+    def upload_mqtt_client_key(self, key: str) -> None:
         raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")

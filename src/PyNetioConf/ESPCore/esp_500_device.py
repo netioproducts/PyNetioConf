@@ -12,6 +12,7 @@ from . import esp_api, ws_api
 from .esp_400_device import ESP400Device
 from .. import NetioManager
 from ..exceptions import CommunicationError
+from ..netio_device import NETIODevice
 
 
 class ESP500Device(ESP400Device):
@@ -70,8 +71,22 @@ class ESP500Device(ESP400Device):
             "writeUsername":   write_auth[0] if write_auth is not None else old_protocol_data["write"]["username"],
             "writePassword":   write_auth[1] if write_auth is not None else old_protocol_data["write"]["password"],
         }
-
+        self.logger.debug(f"Setting json api state on device {self.host}.")
+        self.logger.debug(f"JSON configuration: {json.dumps(protocol_data, indent=4)}")
         ws_api.send_request(self, "SET", "protocols/json/config", protocol_data)
+
+    def get_urlapi_state(self) -> Dict:
+        self.logger.debug(f"Getting urlapi state on device {self.host}.")
+        response = ws_api.send_request(self, "UNSUBSCRIBE", "protocols/url/config")
+        return response["data"]
+
+    def set_urlapi_state(
+            self, protocol_enabled: bool, write_enable: bool, write_password: str
+    ) -> None:
+        old_protocol_data = self.get_urlapi_state()
+        protocol_data = {"enable":   protocol_enabled, "port": 80, "writeEnable": write_enable,
+                         "password": write_password}
+        ws_api.send_request(self, "SET", "protocols/url/config", protocol_data)
 
     def get_output_states(self) -> List[Tuple[int, bool]]:
         socket_list = ws_api.send_request(self, "UNSUBSCRIBE", "outputs/measure")
@@ -134,7 +149,7 @@ class ESP500Device(ESP400Device):
         if self._ka_thread:
             self._keep_alive()
 
-    def update_firmware(self, file) -> None:
+    def update_firmware(self, file) -> NETIODevice:
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError(
                 "You don't have permission to alter settings on this device."
