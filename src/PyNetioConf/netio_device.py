@@ -133,6 +133,21 @@ class NETIODevice(ABC):
     # region Sockets
     # region Socket Control
     @abstractmethod
+    def get_output_state(self, output_id: int) -> bool:
+        """
+        Get the output state of the device.
+        Parameters
+        ----------
+        output_id : int
+            The id of the output.
+
+        Returns
+        -------
+            A boolean indicating if the output is on.
+        """
+        pass
+
+    @abstractmethod
     def set_output(self, output_id: int, state: bool) -> None:
         """
         Set a state of an output given its ID and the desired state.
