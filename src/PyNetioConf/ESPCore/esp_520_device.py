@@ -1,5 +1,5 @@
 """
-Implementation specifics for ESP devices with the firmware 5.0.x.
+Implementation specifics for ESP devices with the firmware 5.2.x.
 """
 
 import atexit
@@ -7,7 +7,13 @@ import json
 import os
 import ssl
 from time import sleep
-from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+
+import sys
+if sys.version_info >= (3, 12):
+    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+else:
+    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing_extensions import override
 
 import websocket
 
@@ -26,7 +32,7 @@ class ESP520Device(
     #NETIODevice
 ):  # TODO: Make sure we inherit from ESP400Device on release
     """
-    A class to control ESP devices with the firmware 5.0.x.
+    A class to control ESP devices with the firmware 5.2.x.
     """
 
     def __init__(

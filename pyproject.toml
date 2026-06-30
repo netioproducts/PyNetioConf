@@ -30,7 +30,8 @@ dependencies = [
     "websocket-client",
     "pyserial",
     "requests",
-    "urllib3"
+    "urllib3",
+    "typing-extensions; python_version < '3.12'"
 ]
 
 [project.urls]

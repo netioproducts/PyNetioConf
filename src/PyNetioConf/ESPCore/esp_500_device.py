@@ -7,7 +7,12 @@ import json
 import os
 import ssl
 from time import sleep
-from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+import sys
+if sys.version_info >= (3, 12):
+    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+else:
+    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing_extensions import override
 
 import websocket
 
