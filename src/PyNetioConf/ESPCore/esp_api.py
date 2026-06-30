@@ -1,16 +1,90 @@
 """
 This module contains functions for sending requests to the device's API on EPS based devices.
 """
+
 import logging
 
 import requests
 
-from ..exceptions import CommunicationError
+from ..exceptions import CommunicationError, InvalidParameterValueError
 from ..netio_device import NETIODevice
+#from . import ESP200Device, ESP300Device, ESP400Device, ESP500Device
+
+from typing import Any, TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
 
+# def init_device(
+#     version: int,
+#     host: str,
+#     username: str,
+#     password: str,
+#     keep_alive: bool = True,
+#     netio_manager: Optional["NetioManager"] = None,  # type: ignore # noqa
+#     use_https: bool = False,
+#     **kwargs: Any,
+# ) -> NETIODevice:
+#     if netio_manager is None:
+#         raise InvalidParameterValueError
+#
+#     if version == 2:
+#         netio_device = ESP200Device(
+#             host,
+#             username,
+#             password,
+#             "",
+#             "",
+#             keep_alive,
+#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+#             use_https,
+#         )
+#         return netio_device
+#
+#     if version == 3:
+#         netio_device = ESP300Device(
+#             host,
+#             username,
+#             password,
+#             "",
+#             "",
+#             keep_alive,
+#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+#             use_https,
+#         )
+#         return netio_device
+#
+#     if version == 4:
+#         netio_device = ESP400Device(
+#             host,
+#             username,
+#             password,
+#             "",
+#             "",
+#             keep_alive,
+#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+#             use_https,
+#         )
+#         return netio_device
+#
+#     if version == 5:
+#         netio_device = ESP500Device(
+#             host,
+#             username,
+#             password,
+#             "",
+#             "",
+#             keep_alive,
+#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+#             use_https,
+#         )
+#         return netio_device
+#
+#     raise InvalidParameterValueError(
+#         f"There is no firmware with major version {version} supported"
+#     )
+#
+#
 def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
     try:
         protocol = "https" if fw_object.use_https else "http"
@@ -19,17 +93,27 @@ def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
 
     try:
         logger.debug(f"Checking connection health of {fw_object.host}.")
-        response = requests.get(f"{protocol}://{fw_object.host}", timeout=timeout, verify=False)
+        response = requests.get(
+            f"{protocol}://{fw_object.host}", timeout=timeout, verify=False
+        )
     except:
         logger.warn(f"Couldn't connect to device {fw_object.host}.")
         return -1
 
-    logger.debug(f"Response time of device {fw_object.host} is {response.elapsed.total_seconds() * 1000.0}ms.")
+    logger.debug(
+        f"Response time of device {fw_object.host} is {response.elapsed.total_seconds() * 1000.0}ms."
+    )
     return response.elapsed.total_seconds()
 
 
-def send_request(fw_object: NETIODevice, command: str, data: dict = None, timeout: int = 60, endpoint: str = 'api',
-                 close: bool = False) -> requests.Response:
+def send_request(
+    fw_object: NETIODevice,
+    command: str,
+    data: dict[str, Any] | None = None,
+    timeout: int = 60,
+    endpoint: str = "api",
+    close: bool = False,
+) -> requests.Response:
     """
     Send an HTTP request to the device's API and return a `requests.Response` object.
 
@@ -58,10 +142,13 @@ def send_request(fw_object: NETIODevice, command: str, data: dict = None, timeou
     except AttributeError:
         protocol = "http"
     netio_host = f"{protocol}://{fw_object.host}/{endpoint}"
-    if endpoint == 'api':
-        json_payload = {"sessionId": fw_object.session_id, "action": command}  # better session id?
+    if endpoint == "api":
+        json_payload = {
+            "sessionId": fw_object.session_id,
+            "action": command,
+        }  # better session id?
     else:
-        json_payload = {}
+        json_payload: dict[str, Any] = {}
 
     if data is not None:
         json_payload["data"] = data
@@ -70,21 +157,27 @@ def send_request(fw_object: NETIODevice, command: str, data: dict = None, timeou
 
     try:
         logger.debug(f"Sending request to {netio_host} with payload {json_payload}")
-        response = session.post(url=netio_host, json=json_payload, timeout=timeout, verify=False)
+        response = session.post(
+            url=netio_host, json=json_payload, timeout=timeout, verify=False
+        )
     except requests.exceptions.ConnectionError:
         logger.error(f"Cannot connect to device {fw_object.host}")
         raise CommunicationError("Cannot connect to device")
 
     # handle errors and repeat request
-    if 'errors' in response.json():
-        if response.json()['errors'][0]['code'] == 1000:
+    if "errors" in response.json():
+        if response.json()["errors"][0]["code"] == 1000:
             # session expired
             logger.info("Session expired, logging in again")
             fw_object.login(fw_object.username, fw_object.password)
             logger.debug(f"Sending request to {netio_host} with payload {json_payload}")
-            response = session.post(url=netio_host, json=json_payload, timeout=timeout, verify=False)
+            response = session.post(
+                url=netio_host, json=json_payload, timeout=timeout, verify=False
+            )
         else:
-            raise CommunicationError("Error in response: " + response.json()['errors'][0]['message'])
+            raise CommunicationError(
+                "Error in response: " + response.json()["errors"][0]["message"]
+            )
 
     if close:
         logger.debug(f"Closing session with {netio_host}")
@@ -92,7 +185,9 @@ def send_request(fw_object: NETIODevice, command: str, data: dict = None, timeou
     return response
 
 
-def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -> requests.Response:
+def send_file(
+    fw_object: NETIODevice, url_path: str, file, timeout: int = 600
+) -> requests.Response:
     """
     Upload a file to the device on the specified URL path, returns the response of the request.
 
@@ -121,29 +216,43 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
     session.cookies.update({"sessionId": fw_object.session_id})
 
     try:
-        if url_path == '/upload/config':
+        if url_path == "/upload/config":
             logger.debug(f"Uploading config file to {netio_host}.")
-            response = session.post(netio_host, files={"sessionId": (None, fw_object.session_id),
-                                                       "data":      ("config.json", file, "application/json")},
-                                    headers={"DNT": "1"}, verify=False)
-        elif url_path == '/upload/firmware':
+            response = session.post(
+                netio_host,
+                files={
+                    "sessionId": (None, fw_object.session_id),
+                    "data": ("config.json", file, "application/json"),
+                },
+                headers={"DNT": "1"},
+                verify=False,
+            )
+        elif url_path == "/upload/firmware":
             logger.debug(f"Uploading firmware to {netio_host}")
-            response = session.post(url=netio_host, files={"file": file}, timeout=timeout, verify=False)
+            response = session.post(
+                url=netio_host, files={"file": file}, timeout=timeout, verify=False
+            )
         elif "upload/ssl/" in url_path:
+            cert_types = ["mqtt_client_cert", "mqtt_client_key", "srvkey", "srvcert", "mqtt_root_ca"]
             if "mqtt_client_key" in url_path:
                 filetype = "application/x-iwork-keynote-sffkey"
-            elif "mqtt_client_cert" in url_path or "mqtt_root_ca" in url_path:
+            elif any(cert in url_path for cert in cert_types):
                 filetype = "application/x-x509-ca-cert"
             logger.debug(f"Uploading SSL certificate to {netio_host}")
             response = session.post(
                 url=netio_host,
                 files={"file": ("file", file, filetype)},
-                headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
-                timeout=timeout, verify=False
+                headers={
+                    "Content-Disposition": f'form-data; name="file"; filename="file"'
+                },
+                timeout=timeout,
+                verify=False,
             )
         else:
             logger.debug(f"Uploading generic file to {netio_host}")
-            response = session.post(url=netio_host, files={"file": file}, timeout=timeout, verify=False)
+            response = session.post(
+                url=netio_host, files={"file": file}, timeout=timeout, verify=False
+            )
     except requests.exceptions.ConnectionError:
         logger.error(f"Cannot connect to device {fw_object.host}")
         raise CommunicationError("Cannot connect to device")
@@ -151,30 +260,43 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
     try:
         response_status: str = response.json()["status"]
     except KeyError:
-        response_status = 'failed'
+        response_status = "failed"
     except requests.exceptions.JSONDecodeError:
-        response_status = 'unknown'
+        response_status = "unknown"
     logger.debug(f"File upload status: {response_status}")
 
-    if response_status == 'failed':
+    if response_status == "failed":
         logger.error(f"Upload failed, logging out, retrying.")
         if check_connectivity(fw_object) != -1:
             fw_object.login(fw_object.username, fw_object.password, logout=True)
         else:
-            raise CommunicationError("Couldn't connect to device after a failed request.")
+            raise CommunicationError(
+                "Couldn't connect to device after a failed request."
+            )
         try:
-            if url_path == '/upload/config':
+            if url_path == "/upload/config":
                 logger.debug(f"Uploading config file to {netio_host}.")
-                response = session.post(netio_host, files={"sessionId": fw_object.session_id,
-                                                           "data":      ("config.json", file, "application/json")},
-                                        headers={"DNT": "1"}, verify=False)
+                response = session.post(
+                    netio_host,
+                    files={
+                        "sessionId": fw_object.session_id,
+                        "data": ("config.json", file, "application/json"),
+                    },
+                    headers={"DNT": "1"},
+                    verify=False,
+                )
             elif url_path == "/cfgimport":
                 logger.debug(f"Uploading config file to {netio_host}.")
-                response = session.post(netio_host, files={"file": ("config.json", file, "application/json")},
-                                        verify=False)
-            elif url_path == '/upload/firmware':
+                response = session.post(
+                    netio_host,
+                    files={"file": ("config.json", file, "application/json")},
+                    verify=False,
+                )
+            elif url_path == "/upload/firmware":
                 logger.debug(f"Uploading firmware to {netio_host}")
-                response = session.post(url=netio_host, files={"file": file}, timeout=timeout, verify=False)
+                response = session.post(
+                    url=netio_host, files={"file": file}, timeout=timeout, verify=False
+                )
             elif "upload/ssl/" in url_path:
                 if "mqtt_client_key" in url_path:
                     filetype = "application/x-iwork-keynote-sffkey"
@@ -184,23 +306,32 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
                 response = session.post(
                     url=netio_host,
                     files={"file": ("file", file, filetype)},
-                    headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
-                    timeout=timeout, verify=False
+                    headers={
+                        "Content-Disposition": f'form-data; name="file"; filename="file"'
+                    },
+                    timeout=timeout,
+                    verify=False,
                 )
             else:
                 logger.debug(f"Uploading generic file to {netio_host}")
-                response = session.post(url=netio_host, files={"file": file}, timeout=timeout, verify=False)
+                response = session.post(
+                    url=netio_host, files={"file": file}, timeout=timeout, verify=False
+                )
         except requests.exceptions.ConnectionError:
             logger.error(f"Cannot connect to device {fw_object.host}.")
             raise CommunicationError("Cannot connect to device.")
-        if response == 'failed':
+        if response == "failed":
             logger.error("Could not send file to device.")
             raise CommunicationError("Cannot send file to device.")
 
     return response
 
 
-def get_file(fw_object: NETIODevice, url_path: str, timeout: int = 600, ) -> requests.Response:
+def get_file(
+    fw_object: NETIODevice,
+    url_path: str,
+    timeout: int = 600,
+) -> requests.Response:
     """
     Download a file from the device on the specified URL path, returns the response of the request.
 
@@ -224,21 +355,29 @@ def get_file(fw_object: NETIODevice, url_path: str, timeout: int = 600, ) -> req
 
     try:
         logger.debug(f"Downloading file from {netio_host}")
-        response = session.get(url=netio_host, cookies={"sessionId": fw_object.session_id},
-                               timeout=timeout, verify=False)
+        response = session.get(
+            url=netio_host,
+            cookies={"sessionId": fw_object.session_id},
+            timeout=timeout,
+            verify=False,
+        )
     except requests.exceptions.ConnectionError:
         raise CommunicationError("Cannot connect to device")
 
-    if response == 'failed':
+    if response == "failed":
         logger.error(f"Request failed, logging out, retrying.")
         fw_object.login(fw_object.username, fw_object.password, logout=True)
         try:
             logger.debug(f"Downloading file from {netio_host}")
-            response = session.get(url=netio_host, cookies={"sessionId": fw_object.session_id},
-                                   timeout=timeout, verify=False)
+            response = session.get(
+                url=netio_host,
+                cookies={"sessionId": fw_object.session_id},
+                timeout=timeout,
+                verify=False,
+            )
         except requests.exceptions.ConnectionError:
             raise CommunicationError("Cannot connect to device")
-        if response == 'failed':
+        if response == "failed":
             raise CommunicationError("Cannot send file to device")
 
     return response

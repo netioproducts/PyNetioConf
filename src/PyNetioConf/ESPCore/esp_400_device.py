@@ -1,6 +1,7 @@
 """
 Implementation specifics for ESP devices with the firmware 4.0.x.
 """
+from typing import Any
 from .esp_300_device import ESP300Device
 from .. import NetioManager
 
@@ -11,6 +12,9 @@ class ESP400Device(ESP300Device):
     """
 
     def __init__(self, host: str, username: str, password: str, sn_number: str, hostname: str, keep_alive: bool =
-    True, netio_manager: NetioManager = None, use_https: bool = False):
+    True, netio_manager: NetioManager | None = None, use_https: bool = False):
         super().__init__(host, username, password, sn_number, hostname, keep_alive, netio_manager, use_https)
         self.fw_version = self.get_version()
+
+    def create_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
+        pass
