@@ -4,18 +4,23 @@ extended by the device-specific classes.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
-
 
 # from .NetioManager import NetioManager
 
 
 class NETIODevice(ABC):
     """
-    A base class for ESPDevices based on the 3.x.x firmware.
+    A base class for Netio devices using the ESP platform.
+
+    When making changes to class init or structure the following needs to be updated in accordance:
+        2.x.x-4.x.x share init class due to API similarities
+        5.beta has own init (deprecated in PyNetioConf 0.2+)
+        5.0.0 has it's own init
+        5.2.0 has it's own init
     """
 
     def __init__(
@@ -322,7 +327,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_outputs_data(self) -> List[dict[str, Any]]:
+    def get_outputs_data(self) -> list[dict[str, Any]]:
         """
         Produces a list of all the outputs on the device and relevant information about it. The information might
         differ between device types.
@@ -335,7 +340,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_output_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> list[tuple[int, bool]]:
         """
         Generates a list of the socket states currently on the device.
 
@@ -532,7 +537,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_periodic_restart(self, enable: bool, restart_period: int | None = None) -> None:
+    def set_periodic_restart(
+        self, enable: bool, restart_period: int | None = None
+    ) -> None:
         """
         Sets the periodic restart feature toggle and optionally changes the restart period.
         Parameters
@@ -580,7 +587,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_user_privileges(self, username: str) -> List[str]:
+    def get_user_privileges(self, username: str) -> list[str]:
         """
         Gets a list of privileges for the specified user.
 
@@ -627,7 +634,7 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def create_user(
-        self, username: str, password: str, privileges: List[str] = None
+        self, username: str, password: str, privileges: list[str] = None
     ) -> None:
         """
         Creates a new user on the device with the given parameters.
@@ -666,7 +673,7 @@ class NETIODevice(ABC):
     # region Protocols
 
     @abstractmethod
-    def get_active_protocols(self) -> List[int]:
+    def get_active_protocols(self) -> list[int]:
         """
         Produces a list of the currently active protocols.
 
@@ -677,7 +684,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_supported_protocols(self) -> List[int]:
+    def get_supported_protocols(self) -> list[int]:
         """
         Produces a list of all the protocols supported by the current device, also contains relevant information about
         those protocols.
@@ -864,7 +871,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_mqttflex_state(self, state: bool, config: dict[str, Any] | None = None) -> None:
+    def set_mqttflex_state(
+        self, state: bool, config: dict[str, Any] | None = None
+    ) -> None:
         """
         Sets the state and if provided configuration of the MQTT Flex protocol.
 
@@ -901,8 +910,8 @@ class NETIODevice(ABC):
         protocol_enabled: bool,
         read_enable: bool,
         write_enable: bool,
-        read_auth: Tuple[str, str],
-        write_auth: Tuple[str, str],
+        read_auth: tuple[str, str],
+        write_auth: tuple[str, str],
     ) -> None:
         """
         Function for configuring the JSON M2M on the device. All parameters are required and will be set to the ones
@@ -930,7 +939,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_json(self, json_auth: Tuple[str, str]) -> dict[str, Any]:
+    def get_json(self, json_auth: tuple[str, str]) -> dict[str, Any]:
         """
         Gets the JSON information from the device. This contains full information about the device.
 
@@ -1114,9 +1123,9 @@ class NETIODevice(ABC):
         protocol_enabled: bool,
         port: int | None = None,
         read_enabled: bool | None = None,
-        read_auth: Tuple[str, str] | None = None,
+        read_auth: tuple[str, str] | None = None,
         write_enabled: bool | None = None,
-        write_auth: Tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
         """
         Sets the state and settings of the telnet M2M protocol currently set on the device.
@@ -1152,8 +1161,8 @@ class NETIODevice(ABC):
         protocol_enabled: bool,
         read_enable: bool,
         write_enable: bool,
-        read_auth: Tuple[str, str],
-        write_auth: Tuple[str, str],
+        read_auth: tuple[str, str],
+        write_auth: tuple[str, str],
     ) -> None:
         """
         Function for configuring the XML M2M on the device. All parameters are required and will be set to the ones
@@ -1181,7 +1190,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_xml(self, xml_auth: Tuple[str, str]) -> Element:
+    def get_xml(self, xml_auth: tuple[str, str]) -> Element:
         """
         Gets the XML information from the device. This contains full information about the device.
 
@@ -1358,7 +1367,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_schedule_names(self) -> List[str]:
+    def get_schedule_names(self) -> list[str]:
         """
         Gets all the schedules available on the device.
 
@@ -1500,4 +1509,16 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def upload_https_certificate(self, certfile: str) -> None:
+        pass
+
+    @abstractmethod
+    def get_version_revision(self) -> str:
+        """
+        Fetches the revision of the current firmware version.
+
+        Returns
+        -------
+        str
+            8-digit hash of the version revision
+        """
         pass

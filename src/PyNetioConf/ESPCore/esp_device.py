@@ -5,15 +5,20 @@ The implementation of the NETIODevice class for ESP firmware based devices.
 import atexit
 import json
 import logging
+import sys
 import threading
 from time import sleep
-from typing import Any, List, Tuple
+
+if sys.version_info >= (3, 12):
+    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+else:
+    from typing import IO, Any, AnyStr, Dict, List, Tuple
+
+    from typing_extensions import override
 from xml.etree import ElementTree as ET
 
 import requests
 
-from . import esp_api
-from ..NetioManager import NetioManager
 from ..exceptions import (
     CommunicationError,
     ElementNotFound,
@@ -22,6 +27,8 @@ from ..exceptions import (
     ProtocolNotEnabled,
 )
 from ..netio_device import NETIODevice
+from ..NetioManager import NetioManager
+from . import esp_api
 
 
 class ESPDevice(NETIODevice):
@@ -248,7 +255,7 @@ class ESPDevice(NETIODevice):
         )
         return output_data
 
-    def get_output_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> list[tuple[int, bool]]:
         outputs = self.get_outputs_data()
         value_list = [(output["outputId"], output["on"]) for output in outputs]
         self.logger.debug(
@@ -454,7 +461,9 @@ class ESPDevice(NETIODevice):
         self.logger.debug(f"Renaming device to {device_name} on url {self.host}")
         esp_api.send_request(self, "setSystemConfig", request_data)
 
-    def set_periodic_restart(self, enable: bool, restart_period: int | None = None) -> None:
+    def set_periodic_restart(
+        self, enable: bool, restart_period: int | None = None
+    ) -> None:
         self.set_system_settings(periodic_restart=enable, restart_period=restart_period)
 
     def locate(self) -> None:
@@ -480,7 +489,9 @@ class ESPDevice(NETIODevice):
         for user in device_users:
             if user["username"] == username:
                 return user["permissions"]
-        self.logger.info(f"Couldn't find the specified user {username} in the user list.")
+        self.logger.info(
+            f"Couldn't find the specified user {username} in the user list."
+        )
         raise ElementNotFound
 
     def get_users(self) -> dict[str, Any]:
@@ -556,14 +567,14 @@ class ESPDevice(NETIODevice):
 
     # region Protocols
 
-    def get_active_protocols(self) -> List[int]:
+    def get_active_protocols(self) -> list[int]:
         response = esp_api.send_request(self, "getActiveProtocols")
         self.logger.debug(
             f"Received active protocols: {response.json()['data']['protocols']} from device {self.host}"
         )
         return response.json()["data"]["protocols"]
 
-    def get_supported_protocols(self) -> List[int]:
+    def get_supported_protocols(self) -> list[int]:
         response = esp_api.send_request(self, "getSupportedProtocols")
         protocols = response.json()["data"]["protocols"]
         self.logger.debug(
@@ -683,8 +694,8 @@ class ESPDevice(NETIODevice):
         protocol_enabled: bool,
         read_enable: bool | None = None,
         write_enable: bool | None = None,
-        read_auth: Tuple[str, str] | None = None,
-        write_auth: Tuple[str, str] | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
         # TODO: Make the parameters optional, so only a specific setting can be changed.
         current_config = self.get_json_api_state()
@@ -734,7 +745,7 @@ class ESPDevice(NETIODevice):
             else:
                 self.logger.debug(f"Unable to set JSON API state on device {self.host}")
 
-    def get_json(self, json_auth: Tuple[str, str]) -> dict[str, Any]:
+    def get_json(self, json_auth: tuple[str, str]) -> dict[str, Any]:
         if 104 not in self.get_active_protocols():
             raise ProtocolNotEnabled("JSON API is not enabled on the device.")
         try:
@@ -769,9 +780,9 @@ class ESPDevice(NETIODevice):
         protocol_enabled: bool,
         port: int | None = None,
         read_enabled: bool | None = None,
-        read_auth: Tuple[str, str] | None = None,
+        read_auth: tuple[str, str] | None = None,
         write_enabled: bool | None = None,
-        write_auth: Tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
         action = "setProtocol"
         current_state = self.get_telnet_api_state()
@@ -1024,8 +1035,8 @@ class ESPDevice(NETIODevice):
         protocol_enabled: bool,
         read_enable: bool,
         write_enable: bool,
-        read_auth: Tuple[str, str],
-        write_auth: Tuple[str, str],
+        read_auth: tuple[str, str],
+        write_auth: tuple[str, str],
     ) -> None:
         # TODO: Make the parameters optional, so only a specific setting can be changed.
         request_data = {
@@ -1056,7 +1067,7 @@ class ESPDevice(NETIODevice):
             else:
                 self.logger.debug(f"Unable to set XML API state on device {self.host}")
 
-    def get_xml(self, xml_auth: Tuple[str, str]) -> ET.Element:
+    def get_xml(self, xml_auth: tuple[str, str]) -> ET.Element:
         if 103 not in self.get_active_protocols():
             raise ProtocolNotEnabled("XML API is not enabled on the device.")
         try:
@@ -1174,7 +1185,7 @@ class ESPDevice(NETIODevice):
         schedule = self.get_schedule_by_name(schedule_name)
         return schedule["id"]
 
-    def get_schedule_names(self) -> List[str]:
+    def get_schedule_names(self) -> list[str]:
         schedules = self.get_schedules()
         schedule_names = []
         self.logger.debug(f"Filtering for schedule names on device {self.host}")
@@ -1270,12 +1281,12 @@ class ESPDevice(NETIODevice):
                 self.logger.debug("Disabled keep-alive thread.")
         except AttributeError:
             pass  # No need to clean up a non existant thread
-        if self.session_id != "":
+        if self.session_id != "" or self.session_id != "TODO AUTH":
             self.logout()
 
     # endregion
 
-    def get_mqttflex_state(self) -> None:
+    def get_mqttflex_state(self) -> dict[str, Any]:
         raise FeatureNotSupported(
             "MQTT with certificates is only supported on firmware 5.0.0 and newer."
         )
@@ -1309,3 +1320,9 @@ class ESPDevice(NETIODevice):
         raise FeatureNotSupported(
             "HTTPS with certificates is only supported on firmware 5.0.0 and newer."
         )
+
+    @override
+    def get_version_revision(self) -> str:
+        response = esp_api.send_request(self, "getVersion").json()["data"]["revision"]
+        self.logger.debug(f"Received device version information: {response}")
+        return response

@@ -3,33 +3,37 @@ Implementation specifics for ESP devices with the firmware 5.2.x.
 """
 
 import atexit
+import io
 import json
 import os
 import ssl
+import sys
+from io import BytesIO
 from time import sleep
 
-import sys
 if sys.version_info >= (3, 12):
     from typing import IO, Any, AnyStr, Dict, List, Tuple, override
 else:
     from typing import IO, Any, AnyStr, Dict, List, Tuple
+
     from typing_extensions import override
 
-import websocket
-
-from . import esp_api, ws_api
 import logging
-from .esp_500_device import ESP500Device
+import threading
+
+import websocket
+from websocket import WebSocket
+
 from .. import NetioManager
 from ..exceptions import CommunicationError, ElementNotFound
 from ..netio_device import NETIODevice
-from websocket import WebSocket
-import threading
+from . import esp_api, ws_api
+from .esp_500_device import ESP500Device
 
 
 class ESP520Device(
-    ESP500Device 
-    #NETIODevice
+    ESP500Device
+    # NETIODevice
 ):  # TODO: Make sure we inherit from ESP400Device on release
     """
     A class to control ESP devices with the firmware 5.2.x.
@@ -53,23 +57,23 @@ class ESP520Device(
         Parameters
         ----------
         host : str
-            
+
         username : str
-            
+
         password : str
-            
+
         sn_number : str
-            
+
         hostname : str
-            
+
          : Any
-            
+
         keep_alive : bool
-            
+
         netio_manager : NetioManager | None
-            
+
         use_https : bool
-            
+
 
         """
         self.host = host
@@ -97,9 +101,9 @@ class ESP520Device(
             self.session_id = "TODO AUTH"
         else:
             self.session_id = self.login(username, password)
-        #self.supported_features = self.get_features()
-        #self.output_count: int = self.supported_features["outputCount"]
-        #self.user_permissions = self.get_current_user()["privileges"]
+        # self.supported_features = self.get_features()
+        # self.output_count: int = self.supported_features["outputCount"]
+        # self.user_permissions = self.get_current_user()["privileges"]
         if keep_alive:
             self._ka_thread = threading.Timer(120, self._keep_alive)
             self._ka_thread.daemon = True
@@ -112,10 +116,20 @@ class ESP520Device(
         self.netio_manager = netio_manager
         # self.fw_version = self.get_version()
 
+        _system_info = self.get_system_info()
+        self.output_count = _system_info["outputCount"]
+        self.input_count = _system_info["inputCount"]
+        self.supported_features["wifi"] = _system_info["wifiSupport"]
+        self.supported_features["eth"] = _system_info["ethSupport"]
+
+    # TODO: Handle repeated code for uploading files using chunking
     @override
     def upload_mqtt_client_key(self, key: str) -> None:
         import base64
-        upload_id = ws_api.send_request(self, "SET", "protocols/mqtt/clientkeyupload", {})["data"]["uploadId"]
+
+        upload_id = ws_api.send_request(
+            self, "SET", "protocols/mqtt/clientkeyupload", {}
+        )["data"]["uploadId"]
         original_bytes = key.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(self, base64_string, 0, len(key), len(key), upload_id)
@@ -123,7 +137,10 @@ class ESP520Device(
     @override
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
         import base64
-        upload_id = ws_api.send_request(self, "SET", "protocols/mqtt/cacertupload", {})["data"]["uploadId"]
+
+        upload_id = ws_api.send_request(self, "SET", "protocols/mqtt/cacertupload", {})[
+            "data"
+        ]["uploadId"]
         original_bytes = ca.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(self, base64_string, 0, len(ca), len(ca), upload_id)
@@ -131,7 +148,99 @@ class ESP520Device(
     @override
     def upload_mqtt_client_certificate(self, cert: str) -> None:
         import base64
-        upload_id = ws_api.send_request(self, "SET", "protocols/mqtt/clientcertupload", {})["data"]["uploadId"]
+
+        upload_id = ws_api.send_request(
+            self, "SET", "protocols/mqtt/clientcertupload", {}
+        )["data"]["uploadId"]
         original_bytes = cert.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(self, base64_string, 0, len(cert), len(cert), upload_id)
+        ws_api.chunk_file_upload(
+            self, base64_string, 0, len(cert), len(cert), upload_id
+        )
+
+    @override
+    def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
+        # TODO: Implement permission checks
+        # if "can_alter_settings" not in self.user_permissions:
+        #     raise PermissionError(
+        #         "You don't have permission to alter settings on this device."
+        #     )
+        if self._ka_thread:
+            self._ka_thread.cancel()
+            self._ka_thread.join()
+
+        pre_reconnect_wait = 20
+        # TODO: Implement supported_features
+        try:
+            if self.supported_features["wifi"] == "yes":
+                wifi_settings = self.get_wifi_settings()
+                if (
+                    wifi_settings["mode"] == "client"
+                    and wifi_settings["client"]["status"] == "Connected"
+                ):
+                    pre_reconnect_wait = 50
+                    self.logger.debug(
+                        "Increased wait time after fimrware update due to active Wi-Fi connection."
+                    )
+        except KeyError:
+            pre_reconnect_wait = 100
+
+        # TODO: Checnk connectivity
+        # if esp_api.check_connectivity(self) > (pre_reconnect_wait / 10.0):
+        #     pre_reconnect_wait = pre_reconnect_wait * 2
+        #     self.logger.debug(
+        #         "Increased wait time after firmware update due to poor connection quality."
+        #     )
+
+        try:
+            ws_type = "SET"
+            ws_topic = "system/fwupdate"
+            ws_data = {}
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+                "uploadId"
+            ]
+
+            if isinstance(file, io.BufferedIOBase):
+                ws_api.upload_file(self, file, upload_id)
+            else:
+                self.logger.debug("Unsupported file format.")
+        except CommunicationError:
+            self.logger.warning(
+                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
+            )
+        self.logger.debug(
+            f"Uploaded firmware, device {self.host} might be unresponsive for a while."
+        )
+
+        # TODO: Sophisticated
+        pre_reconnect_wait = 30
+        sleep(pre_reconnect_wait)
+
+        self.logger.debug(
+            f"Retrying connection to device {self.host} after updating firmware to new version, the device class is now going to update."
+        )
+
+        # TODO: Check connectivity for new FW
+        # device_response_time = esp_api.check_connectivity(self)
+        # retry_limit = 3 if device_response_time == -1 else 0
+        # for _ in range(0, retry_limit):
+        #     device_response_time = esp_api.check_connectivity(self)
+        #
+        # if device_response_time == -1:
+        #     raise CommunicationError(
+        #         "Device couldn't establish connection after firmware update."
+        #     )
+
+        updated_instance = None
+        if type(self.netio_manager) is NetioManager:
+            updated_instance = self.netio_manager.update_device(self, ws_expected=True)
+
+        if isinstance(updated_instance, NETIODevice):
+            self.logger.info(
+                f"The device has updated to {updated_instance.get_version_detailed()}, the device object is now of the {type(updated_instance)} class, check documentation for supported features and changes."
+            )
+
+        if not updated_instance:
+            raise CommunicationError("Coudln't get updated instance.")
+
+        return updated_instance

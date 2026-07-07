@@ -1,6 +1,6 @@
 [project]
 name = "PyNetioConf"
-version = "0.2.0a1"
+version = "0.2.0a2"
 requires-python = ">= 3.10"
 authors = [
     { name = "NETIO products a.s.", email = "support@netio.eu" }
@@ -29,7 +29,6 @@ classifiers = [
 
 dependencies = [
     "websocket-client",
-    "pyserial",
     "requests",
     "urllib3",
     "typing-extensions; python_version < '3.12'"

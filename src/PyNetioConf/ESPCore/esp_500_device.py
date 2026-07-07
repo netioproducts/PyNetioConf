@@ -6,34 +6,39 @@ import atexit
 import json
 import os
 import ssl
-from time import sleep
 import sys
+from io import BytesIO
+from time import sleep
+
 if sys.version_info >= (3, 12):
     from typing import IO, Any, AnyStr, Dict, List, Tuple, override
 else:
     from typing import IO, Any, AnyStr, Dict, List, Tuple
+
     from typing_extensions import override
 
-import websocket
-
-from . import esp_api, ws_api
 import logging
-from .esp_400_device import ESP400Device
+import threading
+
+import websocket
+from websocket import WebSocket
+
 from .. import NetioManager
 from ..exceptions import CommunicationError, ElementNotFound
 from ..netio_device import NETIODevice
-from websocket import WebSocket
-import threading
+from . import esp_api, ws_api
+from .esp_400_device import ESP400Device
 
 
 class ESP500Device(
-    ESP400Device 
-    #NETIODevice
+    ESP400Device
+    # NETIODevice
 ):  # TODO: Make sure we inherit from ESP400Device on release
     """
     A class to control ESP devices with the firmware 5.0.x.
     """
 
+    @override
     def __init__(
         self,
         host: str,
@@ -52,23 +57,23 @@ class ESP500Device(
         Parameters
         ----------
         host : str
-            
+
         username : str
-            
+
         password : str
-            
+
         sn_number : str
-            
+
         hostname : str
-            
+
          : Any
-            
+
         keep_alive : bool
-            
+
         netio_manager : NetioManager | None
-            
+
         use_https : bool
-            
+
 
         """
         self.host = host
@@ -96,9 +101,9 @@ class ESP500Device(
             self.session_id = "TODO AUTH"
         else:
             self.session_id = self.login(username, password)
-        #self.supported_features = self.get_features()
-        #self.output_count: int = self.supported_features["outputCount"]
-        #self.user_permissions = self.get_current_user()["privileges"]
+        # self.supported_features = self.get_features()
+        # self.output_count: int = self.supported_features["outputCount"]
+        # self.user_permissions = self.get_current_user()["privileges"]
         if keep_alive:
             self._ka_thread = threading.Timer(120, self._keep_alive)
             self._ka_thread.daemon = True
@@ -111,6 +116,11 @@ class ESP500Device(
         self.netio_manager = netio_manager
         # self.fw_version = self.get_version()
 
+        _system_info = self.get_system_info()
+        self.output_count = _system_info["outputCount"]
+        self.input_count = _system_info["inputCount"]
+        self.supported_features["wifi"] = _system_info["wifiSupport"]
+        self.supported_features["eth"] = _system_info["ethSupport"]
 
     def login(self, username: str, password: str, logout: bool = False) -> str:
         if logout:
@@ -118,7 +128,9 @@ class ESP500Device(
 
         if self.ws is None:
             if self.use_https:
-                self.ws = websocket.create_connection(f"wss://{self.host}/emweb", sslopt=self.ssl_options)  # pyright: ignore[reportUnknownMemberType]
+                self.ws = websocket.create_connection(
+                    f"wss://{self.host}/emweb", sslopt=self.ssl_options
+                )  # pyright: ignore[reportUnknownMemberType]
             else:
                 self.ws = websocket.create_connection(f"ws://{self.host}/emweb")  # pyright: ignore
             self.ws_req_id = 0
@@ -135,18 +147,20 @@ class ESP500Device(
 
         return "TODO: Authenticate Session ID on 5.x.x"
 
+    @override
     def logout(self) -> None:
         self.ws = None
         self.ws_req_id = 0
 
+    @override
     def get_system_info(self) -> dict[str, Any]:
         ws_type = "SUBSCRIBE"
         ws_topic = "system/info"
         self.logger.debug(f"Fetching system info on {self.host}")
-        return ws_api.send_request(self, ws_type, ws_topic)
+        return ws_api.send_request(self, ws_type, ws_topic)["data"]
 
     def get_version_detailed(self) -> str:
-        return self.get_system_info()["fwversion"]
+        return self.get_system_info()["fwVersion"]
 
     def get_version(self) -> str:
         return self.get_version_detailed().split("-")[0].strip()
@@ -302,8 +316,8 @@ class ESP500Device(
         protocol_enabled: bool,
         read_enable: bool | None = None,
         write_enable: bool | None = None,
-        read_auth: Tuple[str, str] | None = None,
-        write_auth: Tuple[str, str] | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
         old_protocol_data = self.get_json_api_state()
 
@@ -333,7 +347,7 @@ class ESP500Device(
         self.logger.debug(f"JSON configuration: {json.dumps(protocol_data, indent=4)}")
         ws_api.send_request(self, "SET", "protocols/json/config", protocol_data)
 
-    def get_urlapi_state(self) -> Dict[str, Any]:
+    def get_urlapi_state(self) -> dict[str, Any]:
         self.logger.debug(f"Getting urlapi state on device {self.host}.")
         response = ws_api.send_request(self, "SUBSCRIBE", "protocols/url/config")
         return response["data"]
@@ -350,7 +364,7 @@ class ESP500Device(
         }
         ws_api.send_request(self, "SET", "protocols/url/config", protocol_data)
 
-    def get_output_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> list[tuple[int, bool]]:
         socket_list = ws_api.send_request(self, "SUBSCRIBE", "outputs/measure")
         return [
             (socket["id"], socket["state"] == "on")
@@ -385,20 +399,24 @@ class ESP500Device(
         return ws_api.send_request(self, "SUBSCRIBE", "protocols/mqtt/config")["data"]
 
     @override
-    def get_outputs_data(self) -> List[dict[int, dict[str, Any]]]:
-        return ws_api.send_request(self, "SUBSCRIBE", "outputs/measure")["data"]["items"]
+    def get_outputs_data(self) -> list[dict[int, dict[str, Any]]]:
+        return ws_api.send_request(self, "SUBSCRIBE", "outputs/measure")["data"][
+            "items"
+        ]
 
     @override
-    def get_output_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> list[tuple[int, bool]]:
         output_data = self.get_outputs_data()
         output_states = []
         for output in output_data:
-            output_states.append((int(output["id"]), True if output["state"] == "on" else False))
+            output_states.append(
+                (int(output["id"]), True if output["state"] == "on" else False)
+            )
         return output_states
 
     @override
     def get_output_state(self, output_id: int) -> bool:
-        return self.get_output_states()[output_id - 1][1] #TODO: Polish
+        return self.get_output_states()[output_id - 1][1]  # TODO: Polish
 
     def set_mqttflex_state(
         self, state: bool, config: dict[str, Any] | None = None
@@ -435,7 +453,7 @@ class ESP500Device(
             endpoint = endpoint_data["data"]["uploadPath"]
             esp_api.send_file(self, endpoint, f)
 
-    def export_config(self, save_file: str = None) -> Dict:
+    def export_config(self, save_file: str = None) -> dict:
         config = ws_api.send_request(self, "SET", "system/cfgexport", data={})
         if save_file:
             with open(save_file, "w") as file:
@@ -466,9 +484,8 @@ class ESP500Device(
             if self._ka_thread:
                 self._keep_alive()
 
-    def update_firmware(
-        self, file: str | bytes | os.PathLike[AnyStr] | IO[bytes]
-    ) -> NETIODevice:
+    @override
+    def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError(
                 "You don't have permission to alter settings on this device."
@@ -536,7 +553,7 @@ class ESP500Device(
 
     @override
     def ping(self) -> bool:
-        #TODO: Make a proper ping like utility to not force new HTTP connection
+        # TODO: Make a proper ping like utility to not force new HTTP connection
         return True
 
     @override
@@ -546,7 +563,31 @@ class ESP500Device(
         ws_data = None
         self.logger.debug(f"Fetching system log messages from device {self.host}.")
 
-        log_messages: list[dict[str, Any]] = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]
+        log_messages: list[dict[str, Any]] = ws_api.send_request(
+            self, ws_type, ws_topic, ws_data
+        )["data"]
         return log_messages
 
+    @override
+    def set_wifi_settings(self, ssid: str, password: str) -> None:
+        ws_topic = "network/wifi/config"
+        ws_type = "SET"
+        ws_data = {
+            "ssid": ssid,
+            "secured": True if password else False,
+            "password": password,
+        }
+        self.logger.debug(f"Sending Wi-Fi configuration to {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
+    @override
+    def get_wifi_settings(self) -> dict[str, Any]:
+        ws_topic = "network/wifi/config"
+        ws_type = "SUBSCRIBE"
+        ws_data = None
+        self.logger.debug(f"Fetching Wi-Fi configuration from {self.host}")
+        return ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]
+
+    @override
+    def get_version_revision(self) -> str:
+        return self.get_system_info()["fwRevision"]

@@ -1,17 +1,16 @@
-
 import logging
+import re
+import ssl
+from time import perf_counter, sleep
+from typing import TYPE_CHECKING, Any, Optional
 
 import requests
-from websocket import WebSocket
 import websocket
+from websocket import WebSocket
 
 from ..exceptions import CommunicationError, InvalidParameterValueError
 from ..netio_device import NETIODevice
 from . import ws_api
-import ssl
-import re
-
-from typing import Any, TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +67,7 @@ def _setup_ssl(**kwargs: Any) -> tuple[ssl.SSLContext, dict[str, Any]]:
 
     if kwargs.get("ssl_ca_cert_path", None) is not None:
         ssl_options["ca_cert_path"] = kwargs.get("ssl_ca_cert_path")
-        _ssl_context.load_verify_locations(
-            capath=kwargs.get("ssl_ca_cert_path")
-        )
+        _ssl_context.load_verify_locations(capath=kwargs.get("ssl_ca_cert_path"))
 
     if kwargs.get("ssl_ecdh_curve", None) is not None:
         ecdh_curve = kwargs.get("ssl_ecdh_curve")
@@ -124,18 +121,47 @@ def _setup_ssl(**kwargs: Any) -> tuple[ssl.SSLContext, dict[str, Any]]:
     ssl_options["context"] = kwargs.get("ssl_context", _ssl_context)
     return (_ssl_context, ssl_options)
 
-def _try_connect_websocket(host:str, use_https: bool, **kwargs: dict[str, Any]) -> WebSocket:
+
+def _try_connect_websocket(
+    host: str, use_https: bool, try_count: int, **kwargs: dict[str, Any]
+) -> WebSocket:
     ssl_options: dict[str, Any] | None = None
     _ssl_context: ssl.SSLContext | None = None
     if use_https:
         _ssl_context, ssl_options = _setup_ssl(**kwargs)
-    
-    if use_https:
-        ws = websocket.create_connection(f"wss://{host}/emweb", sslopt=ssl_options)  # pyright: ignore[reportUnknownMemberType]
-    else:
-        ws = websocket.create_connection(f"ws://{host}/emweb")  # pyright: ignore[reportUnknownMemberType]
 
+    logger.debug(f"Attempting websocket connection to {host}")
+    for attempt in range(try_count):
+        logger.debug(f"{host} websocket connection attempt {attempt + 1}/{try_count}")
+        try:
+            connection_dt_start = perf_counter()
+            if use_https:
+                ws = websocket.create_connection(
+                    f"wss://{host}/emweb", sslopt=ssl_options, timeout=10
+                )  # pyright: ignore[reportUnknownMemberType]
+            else:
+                ws = websocket.create_connection(f"ws://{host}/emweb", timeout=10)  # pyright: ignore[reportUnknownMemberType]
+
+            if isinstance(ws, WebSocket):
+                logger.debug(f"Succesfully connected to {host}")
+                break
+            else:
+                elapsed_time = perf_counter() - connection_dt_start
+                if elapsed_time < 10:
+                    logger.debug(
+                        "Couldn't establish ws connection in time, waiting to reconnect."
+                    )
+                    sleep(10 - elapsed_time)
+        except:
+            logger.debug(f"Connection to {host} faled on {attempt + 1}/{try_count}")
+            sleep(1)
+            continue
+
+    if isinstance(ws, WebSocket):
+        logger.debug(f"Setting default timeout for {host}.")
+        ws.settimeout(60)
     return ws
+
 
 def initialize_esp(
     host: str,
@@ -148,13 +174,15 @@ def initialize_esp(
 ) -> NETIODevice:
     if netio_manager is None:
         raise InvalidParameterValueError
-    
+
     ws: websocket.WebSocket | None = None
-    version = 4 # TODO: Do version parsing here, not in NetioManager as this is ESP thing, not general NETIO thing
+    version = 4  # TODO: Do version parsing here, not in NetioManager as this is ESP thing, not general NETIO thing
     minor = 0
     patch = 0
     try:
-        ws = _try_connect_websocket(host, use_https, **kwargs)
+        try_count = 3 if not kwargs.get("ws_expected", False) else 15
+
+        ws = _try_connect_websocket(host, use_https, try_count, **kwargs)
         ws_req_id = 0
 
         hello_response = ws_api.device_init_request(ws, ws_req_id, "HELO", host)
@@ -166,7 +194,7 @@ def initialize_esp(
             hello_response["data"]["publicKey"],
             username,
             password,
-            host
+            host,
         )
         ws_req_id += 1
         try:
@@ -176,7 +204,12 @@ def initialize_esp(
             if match:
                 version, minor, patch = match.groups()
         except KeyError:
-            system_info = ws_api.device_init_request(ws, ws_req_id, "SUBSCRIBE", host, "system/info")
+            logger.debug(
+                "Version not found in HELO message, fetching from system/info instead"
+            )
+            system_info = ws_api.device_init_request(
+                ws, ws_req_id, "SUBSCRIBE", host, "system/info"
+            )
             ws_req_id += 2
             version_str = system_info["data"]["fwVersion"]
             version_pattern = r"(\d+)\.(\d+)\.(\d+)"
@@ -184,13 +217,17 @@ def initialize_esp(
             if match:
                 version, minor, patch = match.groups()
             else:
-                version, minor, patch = 5,0,0
+                logger.warn(
+                    f"Websocket on {host} is connected but version couldn't be verified, defaulting to 5beta firmware"
+                )
+                version, minor, patch = 5, 0, 0
     except:
         ws_req_id = 0
         ws = None
 
     if int(version) == 2:
         from .esp_200_device import ESP200Device
+
         netio_device = ESP200Device(
             host,
             username,
@@ -205,6 +242,7 @@ def initialize_esp(
 
     if int(version) == 3:
         from .esp_300_device import ESP300Device
+
         netio_device = ESP300Device(
             host,
             username,
@@ -219,6 +257,7 @@ def initialize_esp(
 
     if int(version) == 4:
         from .esp_400_device import ESP400Device
+
         netio_device = ESP400Device(
             host,
             username,
@@ -234,6 +273,7 @@ def initialize_esp(
     if int(version) == 5:
         if int(minor) >= 2:
             from .esp_520_device import ESP520Device
+
             netio_device = ESP520Device(
                 host,
                 username,
@@ -243,13 +283,14 @@ def initialize_esp(
                 keep_alive,
                 netio_manager,  # pyright: ignore[reportUnknownArgumentType]
                 use_https,
-                ws_connection = ws,
+                ws_connection=ws,
                 ws_req_id=ws_req_id,
-                is_ws_auth=True if ws is not None else False
+                is_ws_auth=True if ws is not None else False,
             )
             return netio_device
         elif int(minor) == 1:
             from .esp_500_device import ESP500Device
+
             netio_device = ESP500Device(
                 host,
                 username,
@@ -259,13 +300,14 @@ def initialize_esp(
                 keep_alive,
                 netio_manager,  # pyright: ignore[reportUnknownArgumentType]
                 use_https,
-                ws_connection = ws,
+                ws_connection=ws,
                 ws_req_id=ws_req_id,
-                is_ws_auth=True if ws is not None else False
+                is_ws_auth=True if ws is not None else False,
             )
             return netio_device
         else:
             from .esp_5beta_device import ESP5BetaDevice
+
             ws = None
             netio_device = ESP5BetaDevice(
                 host,
