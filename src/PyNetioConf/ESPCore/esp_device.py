@@ -414,6 +414,12 @@ class ESPDevice(NETIODevice):
         )
         esp_api.send_request(self, action)
 
+    def reset_output_consumption_counter(self, output_id: int) -> None:
+        # TODO: Implement reset_output_consumption_counter for legacy ESP devices
+        raise NotImplementedError(
+            "reset_output_consumption_counter is not implemented for legacy ESP devices"
+        )
+
     def set_system_settings(
         self,
         device_name: str | None = None,

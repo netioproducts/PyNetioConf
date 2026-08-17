@@ -7,8 +7,10 @@ import json
 import os
 import ssl
 import sys
+from collections import deque
 from io import BytesIO
 from time import sleep
+from xml.etree.ElementTree import Element
 
 if sys.version_info >= (3, 12):
     from typing import IO, Any, AnyStr, Dict, List, Tuple, override
@@ -24,16 +26,14 @@ import websocket
 from websocket import WebSocket
 
 from .. import NetioManager
-from ..exceptions import CommunicationError, ElementNotFound
+from ..constants import DEFAULT_KEEP_ALIVE_QUEUE_LEN, DEFAULT_REQUEST_QUEUE_LEN
+from ..exceptions import CommunicationError, ElementNotFound, InvalidSocketIndex
 from ..netio_device import NETIODevice
 from . import esp_api, ws_api
 from .esp_400_device import ESP400Device
 
 
-class ESP500Device(
-    ESP400Device
-    # NETIODevice
-):  # TODO: Make sure we inherit from ESP400Device on release
+class ESP500Device(NETIODevice):
     """
     A class to control ESP devices with the firmware 5.0.x.
     """
@@ -94,6 +94,13 @@ class ESP500Device(
 
             disable_warnings(category=InsecureRequestWarning)
 
+        # Before we start dealing with websocket communication past initiation we create a deque for the responses.
+        # This is mainly to mitigate potential desynchronization between the device requests and the library posting them.
+        # This is mostly due to SUBSCRIBE topics sending events which we don't react to given the request-response architecture
+        # of PyNetioConf. PING PONG topics also cause potential desynchronization
+        self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
+        self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
@@ -121,6 +128,10 @@ class ESP500Device(
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
+
+    def _keep_alive(self) -> None:
+        # TODO: Implement WebSocket keep-alive logic for 5.0.0+ firmware
+        self.logger.debug(f"Keep-alive stub called for device {self.host}")
 
     def login(self, username: str, password: str, logout: bool = False) -> str:
         if logout:
@@ -153,11 +164,121 @@ class ESP500Device(
         self.ws_req_id = 0
 
     @override
+    def get_current_user(self) -> dict[str, Any]:
+        self.logger.debug(
+            f"Fetching current user ({self.username}) data from device {self.host}"
+        )
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"users/name/{self.username}/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get current user data: {error_msg}")
+        return response.get("data", {})
+
+    @override
+    def get_user_privileges(self, username: str) -> list[str]:
+        self.logger.debug(
+            f"Fetching privileges for user {username} on device {self.host}"
+        )
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"users/name/{username}/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            if (
+                "not found" in error_msg.lower()
+                or "does not exist" in error_msg.lower()
+            ):
+                raise ElementNotFound(
+                    f"User {username} not found on device {self.host}"
+                )
+            raise CommunicationError(
+                f"Failed to get user privileges for {username}: {error_msg}"
+            )
+        data = response.get("data")
+        if not data:
+            raise ElementNotFound(f"User {username} not found on device {self.host}")
+        priv_dict = data.get("privileges", {})
+        return [key for key, val in priv_dict.items() if val is True]
+
+    @override
+    def get_users(self) -> dict[str, Any]:
+        self.logger.debug(f"Fetching users list on device {self.host}")
+        current_user_data = self.get_current_user()
+        if current_user_data:
+            return {self.username: current_user_data}
+        return {}
+
+    @override
+    def create_user(
+        self, username: str, password: str, privileges: list[str] | None = None
+    ) -> None:
+        self.logger.debug(f"Creating user {username} on device {self.host}")
+        hello_response = ws_api.send_request(self, "HELO")
+        public_key = hello_response["data"]["publicKey"]
+        password_hash = ws_api.generate_password_hash(username, password, public_key)
+
+        all_privileges = [
+            "can_alter_rules",
+            "can_alter_settings",
+            "can_alter_users",
+            "can_login",
+            "can_control_outputs",
+            "can_alter_outputs",
+            "can_view_settings",
+            "can_alter_devices",
+            "can_view_history",
+            "can_control_user_buttons",
+            "can_browse_logs",
+            "can_use_tunnels",
+        ]
+        if privileges is None or len(privileges) == 0:
+            privileges = ["can_login"]
+
+        privileges_dict = {key: (key in privileges) for key in all_privileges}
+
+        ws_type = "SET"
+        ws_topic = "users/create"
+        ws_data = {
+            "name": username,
+            "password": "",
+            "passwordHash": password_hash,
+            "privileges": privileges_dict,
+        }
+        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to create user {username}: {error_msg}")
+
+    @override
+    def remove_user(self, username: str) -> None:
+        self.logger.debug(f"Removing user {username} on device {self.host}")
+        ws_type = "SET"
+        ws_topic = "users/delete"
+        ws_data = {"name": username}
+        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to remove user {username}: {error_msg}")
+
+    @override
     def get_system_info(self) -> dict[str, Any]:
         ws_type = "SUBSCRIBE"
         ws_topic = "system/info"
         self.logger.debug(f"Fetching system info on {self.host}")
         return ws_api.send_request(self, ws_type, ws_topic)["data"]
+
+    @override
+    def get_uptime(self) -> int:
+        self.logger.debug(f"Fetching system uptime from device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "system/uptime"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get uptime: {error_msg}")
+        return int(response.get("data", {}).get("uptime", 0))
 
     def get_version_detailed(self) -> str:
         return self.get_system_info()["fwVersion"]
@@ -165,13 +286,20 @@ class ESP500Device(
     def get_version(self) -> str:
         return self.get_version_detailed().split("-")[0].strip()
 
+    @override
     def get_output_data(self, output_id: int) -> dict[str, Any]:
         ws_type = "SUBSCRIBE"
         ws_topic = f"outputs/id/{output_id}/config"
         self.logger.debug(
             f"Fetching output configuration data for output id {output_id} on {self.host}"
         )
-        return ws_api.send_request(self, ws_type, ws_topic)
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(
+                f"Failed to get output data for output {output_id}: {error_msg}"
+            )
+        return response.get("data", {})
 
     def _set_output_config(
         self,
@@ -206,6 +334,13 @@ class ESP500Device(
         }
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
+    def _check_socket_index(self, socket_index: int) -> None:
+        if socket_index < 1 or socket_index > self.output_count:
+            raise InvalidSocketIndex(
+                f"You tried to access socket with id {socket_index},"
+                f" the device supports <1;{self.output_count}>."
+            )
+
     def rename_output(self, output_id: int, output_name: str) -> None:
         self.logger.debug(f"Renaming output {output_id} to new name: {output_name}")
         self._set_output_config(output_id, output_name=output_name)
@@ -221,6 +356,82 @@ class ESP500Device(
         self.logger.debug(
             f"Setting output {output_id} on device {self.host} to {state}."
         )
+
+    @override
+    def set_outputs_unified(self, state: bool) -> None:
+        self.logger.debug(
+            f"Setting all outputs unified to {state} on device {self.host}"
+        )
+        for output in range(1, self.output_count + 1):
+            self.set_output(output, state)
+
+    @override
+    def reset_output(self, output_id: int) -> None:
+        raise NotImplementedError("reset_output is not supported on 5.0.0+ firmware")
+
+    @override
+    def reset_output_consumption_counter(self, output_id: int) -> None:
+        self._check_socket_index(output_id)
+        self.logger.debug(
+            f"Resetting power consumption counters for output {output_id} on device {self.host}"
+        )
+        response = ws_api.send_request(
+            self,
+            "SET",
+            f"outputs/id/{output_id}/resetOutputConsumption",
+            {"request": True},
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(
+                f"Failed to reset power consumption counters for output {output_id}: {error_msg}"
+            )
+
+    @override
+    def reset_power_consumption_counters(self) -> None:
+        self.logger.debug(
+            f"Resetting power consumption counters for all outputs on device {self.host}"
+        )
+        for output in range(1, self.output_count + 1):
+            self.reset_output_consumption_counter(output)
+            sleep(0.1)
+
+    @override
+    def get_output_schedule(self, output_id: int) -> dict[str, Any]:
+        output_data = self.get_output_data(output_id)
+        return {
+            "id": output_data.get("scheduleId", 0),
+            "on": output_data.get("isScheduleActive", False),
+        }
+
+    @override
+    def get_output_schedule_id(self, output_id: int) -> int:
+        return int(self.get_output_schedule(output_id)["id"])
+
+    @override
+    def set_output_schedule(
+        self, output_id: int, schedule_id: int, enabled: bool = True
+    ) -> None:
+        self.logger.debug(
+            f"Setting output {output_id} schedule to schedule ID {schedule_id} (active={enabled}) on {self.host}"
+        )
+        self._set_output_config(
+            output_id, schedule_id=schedule_id, is_schedule_active=enabled
+        )
+
+    @override
+    def set_output_schedule_state(self, output_id: int, schedule_enabled: bool) -> None:
+        self.logger.debug(
+            f"Setting output {output_id} schedule state to {schedule_enabled} on {self.host}"
+        )
+        self._set_output_config(output_id, is_schedule_active=schedule_enabled)
+
+    @override
+    def set_output_schedule_by_name(
+        self, output_id: int, schedule_name: str, enabled: bool = True
+    ) -> None:
+        schedule_id = self.get_schedule_id(schedule_name)
+        self.set_output_schedule(output_id, schedule_id, enabled)
 
     def _create_configurable_block(
         self, enable: bool, name: str, config: dict[str, Any], topic: str
@@ -245,6 +456,51 @@ class ESP500Device(
         self.logger.debug(f"Rule configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
 
+    @override
+    def get_rules(self) -> list[dict[str, Any]]:
+        self.logger.debug(f"Getting rules from device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "rules/list"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get rules: {error_msg}")
+        return response.get("data", {}).get("items", [])
+
+    @override
+    def get_rule_by_name(self, rule_name: str) -> dict[str, Any]:
+        self.logger.debug(f"Filtering for rule {rule_name} on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"rules/name/{rule_name}/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            if (
+                "not found" in error_msg.lower()
+                or "does not exist" in error_msg.lower()
+            ):
+                raise ElementNotFound(
+                    f"Rule {rule_name} not found on device {self.host}"
+                )
+            raise CommunicationError(f"Failed to get rule {rule_name}: {error_msg}")
+
+        data = response.get("data")
+        if not data:
+            raise ElementNotFound(f"Rule {rule_name} not found on device {self.host}")
+        return data
+
+    @override
+    def get_enabled_rules(self) -> list[dict[str, Any]]:
+        rules = self.get_rules()
+        self.logger.debug(f"Filtering for enabled rules from device {self.host}")
+        return [rule for rule in rules if rule.get("enabled") is True]
+
+    @override
+    def get_disabled_rules(self) -> list[dict[str, Any]]:
+        rules = self.get_rules()
+        self.logger.debug(f"Filtering for disabled rules from device {self.host}")
+        return [rule for rule in rules if rule.get("enabled") is False]
+
     def create_pab(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         topic = "/pab/create"
         try:
@@ -255,6 +511,49 @@ class ESP500Device(
         self.logger.debug(f"Attempting to create PAB {name} on device {self.host}.")
         self.logger.debug(f"PAB configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
+
+    @override
+    def get_pabs(self) -> list[dict[str, Any]]:
+        self.logger.debug(f"Getting PABs from device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "pab/list"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get PABs: {error_msg}")
+        return response.get("data", {}).get("items", [])
+
+    @override
+    def get_pab_by_name(self, pab_name: str) -> dict[str, Any]:
+        self.logger.debug(f"Filtering for PAB {pab_name} on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"pab/name/{pab_name}/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            if (
+                "not found" in error_msg.lower()
+                or "does not exist" in error_msg.lower()
+            ):
+                raise ElementNotFound(f"PAB {pab_name} not found on device {self.host}")
+            raise CommunicationError(f"Failed to get PAB {pab_name}: {error_msg}")
+
+        data = response.get("data")
+        if not data:
+            raise ElementNotFound(f"PAB {pab_name} not found on device {self.host}")
+        return data
+
+    @override
+    def get_enabled_pabs(self) -> list[dict[str, Any]]:
+        pabs = self.get_pabs()
+        self.logger.debug(f"Filtering for enabled PABs from device {self.host}")
+        return [pab for pab in pabs if pab.get("enabled") is True]
+
+    @override
+    def get_disabled_pabs(self) -> list[dict[str, Any]]:
+        pabs = self.get_pabs()
+        self.logger.debug(f"Filtering for disabled PABs from device {self.host}")
+        return [pab for pab in pabs if pab.get("enabled") is False]
 
     def create_watchdog(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         topic = "/wdtpingers/create"
@@ -268,6 +567,57 @@ class ESP500Device(
         )
         self.logger.debug(f"Watchdog configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
+
+    @override
+    def get_watchdogs(self) -> list[dict[str, Any]]:
+        self.logger.debug(f"Getting watchdogs from device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "wdtpingers/list"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get watchdogs: {error_msg}")
+        return response.get("data", {}).get("items", [])
+
+    @override
+    def get_watchdog_by_name(self, watchdog_name: str) -> dict[str, Any]:
+        self.logger.debug(
+            f"Filtering for watchdog {watchdog_name} on device {self.host}"
+        )
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"wdtpingers/name/{watchdog_name}/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            if (
+                "not found" in error_msg.lower()
+                or "does not exist" in error_msg.lower()
+            ):
+                raise ElementNotFound(
+                    f"Watchdog {watchdog_name} not found on device {self.host}"
+                )
+            raise CommunicationError(
+                f"Failed to get watchdog {watchdog_name}: {error_msg}"
+            )
+
+        data = response.get("data")
+        if not data:
+            raise ElementNotFound(
+                f"Watchdog {watchdog_name} not found on device {self.host}"
+            )
+        return data
+
+    @override
+    def get_enabled_watchdogs(self) -> list[dict[str, Any]]:
+        watchdogs = self.get_watchdogs()
+        self.logger.debug(f"Filtering for enabled watchdogs from device {self.host}")
+        return [w for w in watchdogs if w.get("enabled") is True]
+
+    @override
+    def get_disabled_watchdogs(self) -> list[dict[str, Any]]:
+        watchdogs = self.get_watchdogs()
+        self.logger.debug(f"Filtering for disabled watchdogs from device {self.host}")
+        return [w for w in watchdogs if w.get("enabled") is False]
 
     def create_schedule(self, name: str, intervals: list[dict[int, Any]]) -> None:
         topic = "/schedules/create"
@@ -287,6 +637,109 @@ class ESP500Device(
         self.logger.debug(f"Schedule configuration: {intervals}")
         ws_api.send_request(self, ws_type, topic, ws_data)
 
+    @override
+    def get_schedules(self) -> list[dict[str, Any]]:
+        self.logger.debug(f"Getting a schedule list from device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "schedules/list"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get schedules: {error_msg}")
+        return response.get("data", {}).get("items", [])
+
+    @override
+    def get_schedule_by_name(self, schedule_name: str) -> dict[str, Any]:
+        self.logger.debug(
+            f"Filtering for schedule {schedule_name} on device {self.host}"
+        )
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"schedules/name/{schedule_name}/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            if (
+                "not found" in error_msg.lower()
+                or "does not exist" in error_msg.lower()
+            ):
+                raise ElementNotFound(
+                    f"Schedule {schedule_name} not found on device {self.host}"
+                )
+            raise CommunicationError(
+                f"Failed to get schedule {schedule_name}: {error_msg}"
+            )
+
+        data = response.get("data")
+        if not data:
+            raise ElementNotFound(
+                f"Schedule {schedule_name} not found on device {self.host}"
+            )
+        return data
+
+    @override
+    def get_schedule_id(self, schedule_name: str) -> int:
+        schedules = self.get_schedules()
+        for schedule in schedules:
+            if schedule.get("name") == schedule_name:
+                return int(schedule["id"])
+        raise ElementNotFound(
+            f"Schedule {schedule_name} not found on device {self.host}"
+        )
+
+    @override
+    def get_schedule_names(self) -> list[str]:
+        schedules = self.get_schedules()
+        self.logger.debug(f"Filtering for schedule names on device {self.host}")
+        return [schedule["name"] for schedule in schedules if "name" in schedule]
+
+    @override
+    def get_active_schedules(self) -> list[dict[str, Any]]:
+        schedules = self.get_schedules()
+        self.logger.debug(f"Filtering for active schedules on device {self.host}")
+        return [schedule for schedule in schedules if schedule.get("active") is True]
+
+    @override
+    def delete_schedule(self, schedule_id: int) -> None:
+        self.logger.debug(f"Deleting schedule {schedule_id} from device {self.host}")
+        schedules = self.get_schedules()
+        schedule_name = None
+        for schedule in schedules:
+            if schedule.get("id") == schedule_id:
+                schedule_name = schedule.get("name")
+                break
+
+        if not schedule_name:
+            raise ElementNotFound(
+                f"Schedule with ID {schedule_id} not found on device {self.host}"
+            )
+
+        self.delete_schedule_by_name(schedule_name)
+
+    @override
+    def delete_schedule_by_name(self, schedule_name: str) -> None:
+        # Check for schedule existing, error out if it doesn't
+        try:
+            self.get_schedule_by_name(schedule_name)
+        except ElementNotFound:
+            raise ElementNotFound(
+                f"Schedule {schedule_name} not found on device {self.host}"
+            )
+
+        topic = "schedules/delete"
+        ws_type = "SET"
+        ws_data = {"name": schedule_name}
+        self.logger.debug(
+            f"Attempting to delete schedule {schedule_name} on device {self.host}."
+        )
+        response = ws_api.send_request(self, ws_type, topic, ws_data)
+
+        # Check response for failure
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(
+                f"Failed to delete schedule {schedule_name}: {error_msg}"
+            )
+
     def delete_rule_by_name(self, name: str) -> None:
         # Check for rule existing, error out if it doesn't
         try:
@@ -296,9 +749,15 @@ class ESP500Device(
         topic = "/rules/delete"
         ws_type = "SET"
         ws_data = {"name": name}
-        self.logger.debug(f"Attempting to delete {name} on device {self.host}.")
-        ws_api.send_request(self, ws_type, topic, ws_data)
+        self.logger.debug(f"Attempting to delete rule {name} on device {self.host}.")
+        response = ws_api.send_request(self, ws_type, topic, ws_data)
 
+        # Check response for failure
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to delete rule {name}: {error_msg}")
+
+    @override
     def delete_pab_by_name(self, pab_name: str) -> None:
         # Check for PAB existing, error out if it doesn't
         try:
@@ -309,7 +768,365 @@ class ESP500Device(
         ws_type = "SET"
         ws_data = {"name": pab_name}
         self.logger.debug(f"Attempting to delete PAB {pab_name} on device {self.host}.")
-        ws_api.send_request(self, ws_type, topic, ws_data)
+        response = ws_api.send_request(self, ws_type, topic, ws_data)
+
+        # Check response for failure
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to delete PAB {pab_name}: {error_msg}")
+
+    @override
+    def get_active_protocols(self) -> list[int]:
+        self.logger.debug(f"Fetching active protocols on {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/info"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get active protocols: {error_msg}")
+
+        active_dict = response.get("data", {}).get("active", {})
+        active_ids = []
+        protocol_map = {
+            "xml": 103,
+            "json": 104,
+            "url": 105,
+            "telnet": 106,
+            "modbus": 107,
+            "mqtt": 108,
+            "push": 109,
+            "snmp": 110,
+        }
+        for name, is_active in active_dict.items():
+            if is_active and name in protocol_map:
+                active_ids.append(protocol_map[name])
+        return active_ids
+
+    @override
+    def get_supported_protocols(self) -> list[int]:
+        self.logger.debug(f"Fetching supported protocols on {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/info"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get supported protocols: {error_msg}")
+
+        active_dict = response.get("data", {}).get("active", {})
+        protocol_map = {
+            "xml": 103,
+            "json": 104,
+            "url": 105,
+            "telnet": 106,
+            "modbus": 107,
+            "mqtt": 108,
+            "push": 109,
+            "snmp": 110,
+        }
+        supported_ids = []
+        for name in active_dict.keys():
+            if name in protocol_map:
+                supported_ids.append(protocol_map[name])
+        return supported_ids
+
+    def get_xml_api_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting XML API state on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/xml/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get XML API state: {error_msg}")
+        return response["data"]
+
+    @override
+    def set_xml_api_state(
+        self,
+        protocol_enabled: bool,
+        read_enable: bool,
+        write_enable: bool,
+        read_auth: tuple[str, str],
+        write_auth: tuple[str, str],
+    ) -> None:
+        self.logger.debug(f"Setting XML API state on device {self.host}")
+        protocol_data = {
+            "enable": protocol_enabled,
+            "port": 80,
+            "readOnlyEnable": read_enable,
+            "readUsername": read_auth[0],
+            "readPassword": read_auth[1],
+            "readWriteEnable": write_enable,
+            "writeUsername": write_auth[0],
+            "writePassword": write_auth[1],
+        }
+        response = ws_api.send_request(
+            self, "SET", "protocols/xml/config", protocol_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set XML API state: {error_msg}")
+
+    @override
+    def get_json_api_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting JSON API state on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/json/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get JSON API state: {error_msg}")
+        return response["data"]
+
+    @override
+    def get_json(self, json_auth: tuple[str, str]) -> dict[str, Any]:
+        # TODO: Implement get_json for 5.0.0+ firmware
+        raise NotImplementedError("get_json is not yet implemented for 5.0.0+ firmware")
+
+    @override
+    def get_xml(self, xml_auth: tuple[str, str]) -> Element:
+        # TODO: Implement get_xml for 5.0.0+ firmware
+        raise NotImplementedError("get_xml is not yet implemented for 5.0.0+ firmware")
+
+    @override
+    def get_telnet_api_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting Telnet API state on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/telnet/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get Telnet API state: {error_msg}")
+        return response["data"]
+
+    @override
+    def set_telnet_api_state(
+        self,
+        protocol_enabled: bool,
+        port: int | None = None,
+        read_enabled: bool | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_enabled: bool | None = None,
+        write_auth: tuple[str, str] | None = None,
+    ) -> None:
+        self.logger.debug(f"Setting Telnet API state on device {self.host}")
+        current = self.get_telnet_api_state()
+        protocol_data = {
+            "enable": protocol_enabled,
+            "port": port if port is not None else current.get("port", 23),
+            "readOnlyEnable": read_enabled
+            if read_enabled is not None
+            else current.get("readOnlyEnable", True),
+            "readUsername": read_auth[0]
+            if read_auth is not None
+            else current.get("readUsername", ""),
+            "readPassword": read_auth[1]
+            if read_auth is not None
+            else current.get("readPassword", ""),
+            "readWriteEnable": write_enabled
+            if write_enabled is not None
+            else current.get("readWriteEnable", True),
+            "writeUsername": write_auth[0]
+            if write_auth is not None
+            else current.get("writeUsername", "netio"),
+            "writePassword": write_auth[1]
+            if write_auth is not None
+            else current.get("writePassword", "netio"),
+        }
+        response = ws_api.send_request(
+            self, "SET", "protocols/telnet/config", protocol_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set Telnet API state: {error_msg}")
+
+    @override
+    def get_modbus_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting Modbus M2M API state on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/modbus/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get Modbus API state: {error_msg}")
+        return response["data"]
+
+    @override
+    def set_modbus_state(
+        self,
+        protocol_enabled: bool,
+        port: int = 502,
+        ip_filter_enabled: bool = False,
+        ip_from: str = "0.0.0.0",
+        ip_to: str = "0.0.0.0",
+    ) -> None:
+        self.logger.debug(f"Setting Modbus M2M API state on device {self.host}")
+        protocol_data = {
+            "enable": protocol_enabled,
+            "port": port,
+            "lastIp": "0.0.0.0",
+            "ipFilterEnable": ip_filter_enabled,
+            "ipFrom": ip_from,
+            "ipTo": ip_to,
+        }
+        response = ws_api.send_request(
+            self, "SET", "protocols/modbus/config", protocol_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set Modbus state: {error_msg}")
+
+    @override
+    def get_netio_push_api_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting Netio Push API state on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/push/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get Push API state: {error_msg}")
+        return response["data"]
+
+    @override
+    def set_netio_push_api_state(
+        self,
+        protocol_enabled: bool,
+        url: str | None = None,
+        push_protocol: str | None = None,
+        delta: int | None = None,
+        period: int | None = None,
+    ) -> None:
+        self.logger.debug(f"Setting Netio Push API state on device {self.host}")
+        current = self.get_netio_push_api_state()
+        protocol_data = {
+            "enable": protocol_enabled,
+            "url": url
+            if url is not None
+            else current.get("url", "http://test.example.com:80/push"),
+            "protocol": (
+                push_protocol.upper()
+                if push_protocol is not None
+                else current.get("protocol", "JSON")
+            ),
+            "delta": delta if delta is not None else current.get("delta", 0),
+            "period": period if period is not None else current.get("period", 60),
+        }
+        response = ws_api.send_request(
+            self, "SET", "protocols/push/config", protocol_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set Push API state: {error_msg}")
+
+    @override
+    def get_snmp_api_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting SNMP API state on device {self.host}")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/snmp/config"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get SNMP API state: {error_msg}")
+        return response["data"]
+
+    @override
+    def _set_snmp_api_state(
+        self,
+        protocol_enabled: bool,
+        version: str,
+        location: str | None = None,
+        community_read: str | None = None,
+        community_write: str | None = None,
+        security_name: str | None = None,
+        security_level: str | None = None,
+        auth_protocol: str | None = None,
+        auth_key: str | None = None,
+        priv_protocol: str | None = None,
+        priv_key: str | None = None,
+    ) -> None:
+        self.logger.debug(f"Setting SNMP API state on device {self.host}")
+        current_state = self.get_snmp_api_state()
+        ver = "v1-2" if version in ("v1,2c", "v1-2") else "v3"
+
+        request_data = {
+            "enable": protocol_enabled,
+            "location": location
+            if location is not None
+            else current_state.get("location", "Unknown"),
+            "communityRead": community_read
+            if community_read is not None
+            else current_state.get("communityRead", "public"),
+            "communityWrite": community_write
+            if community_write is not None
+            else current_state.get("communityWrite", "private"),
+            "version": ver,
+            "securityName": security_name
+            if security_name is not None
+            else current_state.get("securityName", "netio"),
+            "authAlgo": auth_protocol
+            if auth_protocol is not None
+            else current_state.get("authAlgo", "SHA"),
+            "authKey": auth_key
+            if auth_key is not None
+            else current_state.get("authKey", "netio"),
+            "encryptAlgo": priv_protocol
+            if priv_protocol is not None
+            else current_state.get("encryptAlgo", "AES"),
+            "encryptKey": priv_key
+            if priv_key is not None
+            else current_state.get("encryptKey", "netio"),
+            "securityLevel": security_level
+            if security_level is not None
+            else current_state.get("securityLevel", "authPriv"),
+        }
+
+        response = ws_api.send_request(
+            self, "SET", "protocols/snmp/config", request_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set SNMP API state: {error_msg}")
+
+    @override
+    def set_snmp_v1_2_api_state(
+        self,
+        protocol_enabled: bool,
+        location: str | None = None,
+        community_read: str | None = None,
+        community_write: str | None = None,
+    ) -> None:
+        self.logger.debug(f"Setting SNMP v1,2c API state on device {self.host}")
+        self._set_snmp_api_state(
+            protocol_enabled=protocol_enabled,
+            version="v1-2",
+            location=location,
+            community_read=community_read,
+            community_write=community_write,
+        )
+
+    @override
+    def set_snmp_v3_api_state(
+        self,
+        protocol_enabled: bool,
+        location: str | None = None,
+        security_name: str | None = None,
+        security_level: str | None = None,
+        auth_protocol: str | None = None,
+        auth_key: str | None = None,
+        priv_protocol: str | None = None,
+        priv_key: str | None = None,
+    ) -> None:
+        self.logger.debug(f"Setting SNMP v3 API state on device {self.host}")
+        self._set_snmp_api_state(
+            protocol_enabled=protocol_enabled,
+            version="v3",
+            location=location,
+            security_name=security_name,
+            security_level=security_level,
+            auth_protocol=auth_protocol,
+            auth_key=auth_key,
+            priv_protocol=priv_protocol,
+            priv_key=priv_key,
+        )
 
     def set_json_api_state(
         self,
@@ -589,5 +1406,173 @@ class ESP500Device(
         return ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]
 
     @override
+    def set_wifi_static_address(
+        self, address: str, net_mask: str, gateway: str, dns_server: str, hostname: str
+    ) -> None:
+        self.logger.debug(f"Setting Wi-Fi static address on device {self.host}")
+        netwifi_res = ws_api.send_request(self, "SUBSCRIBE", "network/netwifi/config")
+        netwifi_data = netwifi_res.get("data", {})
+        netwifi_data["networkMode"] = "static"
+        netwifi_data["ip"] = address
+        netwifi_data["netmask"] = net_mask
+        netwifi_data["gateway"] = gateway
+        netwifi_data["dns"] = dns_server
+        response = ws_api.send_request(
+            self, "SET", "network/netwifi/config", netwifi_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set Wi-Fi static address: {error_msg}")
+
+    @override
     def get_version_revision(self) -> str:
         return self.get_system_info()["fwRevision"]
+
+    @override
+    def set_periodic_restart(
+        self, enable: bool, restart_period: int | None = None
+    ) -> None:
+        self.logger.debug(f"Setting periodic restart on device {self.host}")
+        cfg_res = ws_api.send_request(self, "SUBSCRIBE", "system/config")
+        cfg_data = cfg_res.get("data", {})
+        cfg_data["periodRestartEnable"] = enable
+        if restart_period is not None:
+            cfg_data["periodRestartPeriod"] = restart_period
+        ws_api.send_request(self, "SET", "system/config", cfg_data)
+
+    @override
+    def rename_device(self, device_name: str) -> None:
+        self.logger.debug(f"Renaming device {self.host} to {device_name}")
+        cfg_res = ws_api.send_request(self, "SUBSCRIBE", "system/config")
+        cfg_data = cfg_res.get("data", {})
+        cfg_data["devname"] = device_name
+        ws_api.send_request(self, "SET", "system/config", cfg_data)
+
+    @override
+    def set_system_settings(
+        self,
+        device_name: str | None = None,
+        port: int | None = None,
+        periodic_restart: bool | None = None,
+        restart_period: int | None = None,
+    ) -> None:
+        self.logger.debug(f"Setting system settings on device {self.host}")
+        cfg_res = ws_api.send_request(self, "SUBSCRIBE", "system/config")
+        cfg_data = cfg_res.get("data", {})
+        if device_name is not None:
+            cfg_data["devname"] = device_name
+        if periodic_restart is not None:
+            cfg_data["periodRestartEnable"] = periodic_restart
+        if restart_period is not None:
+            cfg_data["periodRestartPeriod"] = restart_period
+        response = ws_api.send_request(self, "SET", "system/config", cfg_data)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set system settings: {error_msg}")
+
+    @override
+    def locate(self) -> None:
+        self.logger.debug(f"Locating device {self.host}")
+        ws_api.send_request(self, "SET", "system/locate", {"locate": True})
+
+    @override
+    def clear_system_log(self) -> None:
+        self.logger.debug(f"Clearing system log on device {self.host}")
+        ws_api.send_request(self, "SET", "log/clear", {})
+
+    @override
+    def change_user_password(
+        self, username: str, old_password: str, new_password: str
+    ) -> None:
+        self.logger.debug(
+            f"Changing password for user {username} on device {self.host}"
+        )
+        user_cfg_res = ws_api.send_request(
+            self, "SUBSCRIBE", f"users/name/{username}/config"
+        )
+        if user_cfg_res.get("status") == "failed" or "error" in user_cfg_res:
+            error_msg = user_cfg_res.get("error", f"User {username} not found")
+            raise CommunicationError(
+                f"Failed to fetch user config for {username}: {error_msg}"
+            )
+
+        user_data = user_cfg_res["data"]
+        public_key = self.ws_helo_data.get("publicKey", "")
+        password_hash = ws_api.generate_password_hash(
+            username, new_password, public_key
+        )
+        user_data["passwordHash"] = password_hash
+        user_data["password"] = ""
+
+        response = ws_api.send_request(
+            self, "SET", f"users/name/{username}/config", user_data
+        )
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(
+                f"Failed to change password for user {username}: {error_msg}"
+            )
+
+    @override
+    def change_password(self, new_password: str) -> None:
+        self.change_user_password(self.username, "", new_password)
+
+    @override
+    def get_cloud_state(self) -> dict[str, Any]:
+        self.logger.debug(f"Getting cloud state on device {self.host}")
+        response = ws_api.send_request(self, "SUBSCRIBE", "protocols/cloud")
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to get cloud state: {error_msg}")
+        return response["data"]
+
+    @override
+    def set_cloud_state(self, state: bool) -> None:
+        self.logger.debug(f"Setting cloud state to {state} on device {self.host}")
+        cloud_data = self.get_cloud_state()
+        cloud_data["enabled"] = state
+        response = ws_api.send_request(self, "SET", "protocols/cloud", cloud_data)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to set cloud state: {error_msg}")
+
+    @override
+    def register_to_cloud(self, token: str) -> None:
+        self.logger.debug(
+            f"Registering to cloud with token {token} on device {self.host}"
+        )
+        payload = {"action": "register", "token": token, "server": ""}
+        response = ws_api.send_request(self, "SET", "protocols/cloud/cmd", payload)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(f"Failed to register to cloud: {error_msg}")
+
+    @override
+    def set_on_premise(self, url: str) -> None:
+        self.logger.debug(
+            f"Setting on-premise cloud server to {url} on device {self.host}"
+        )
+        payload = {"action": "setOnPremis", "token": "", "server": url}
+        response = ws_api.send_request(self, "SET", "protocols/cloud/cmd", payload)
+        if response.get("status") == "failed" or "error" in response:
+            error_msg = response.get("error", "Unknown error occurred on device")
+            raise CommunicationError(
+                f"Failed to set on-premise cloud server: {error_msg}"
+            )
+
+    @override
+    def netio_push_api_push_now(self) -> None:
+        raise NotImplementedError(
+            "netio_push_api_push_now is not implemented on 5.0.0+ devices"
+        )
+
+    def _cleanup(self) -> None:
+        try:
+            if self._ka_thread:
+                self._ka_thread.cancel()
+                self._ka_thread.join()
+                self.logger.debug("Disabled keep-alive thread.")
+        except AttributeError:
+            pass  # No need to clean up a non existant thread
+        # TODO: Logout to be sure here even though destroying the connection should be sufficient
+        self.ws = None

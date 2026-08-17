@@ -4,7 +4,8 @@ extended by the device-specific classes.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from collections import deque
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple
 from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
@@ -49,6 +50,8 @@ class NETIODevice(ABC):
         self.ws: WebSocket | None = None
         self.ws_req_id = 0
         self.use_https = use_https
+        self._request_queue: deque[dict[str, Any]] = deque()
+        self._pong_queue: deque[dict[str, Any]] = deque()
         if use_https:
             from urllib3 import disable_warnings
             from urllib3.exceptions import InsecureRequestWarning
@@ -533,6 +536,18 @@ class NETIODevice(ABC):
 
         Returns
         -------
+        """
+        pass
+
+    @abstractmethod
+    def reset_output_consumption_counter(self, output_id: int) -> None:
+        """
+        Resets power consumption counters for a specific output by its ID.
+
+        Parameters
+        ----------
+        output_id : int
+            The number of the output to reset counters for.
         """
         pass
 

@@ -11,6 +11,8 @@ from typing import Any, BinaryIO, NamedTuple, Tuple
 
 from websocket import WebSocket
 
+from PyNetioConf.constants import WS_EXECUTION_DELAY
+
 from ..exceptions import CommunicationError
 from ..netio_device import NETIODevice
 
@@ -64,10 +66,14 @@ def send_request(
                 "No websocket connection associated with the device"
             )
         device.ws.send(json.dumps(request))
+        sleep(
+            WS_EXECUTION_DELAY  # TODO: Tie to device/NM
+        )  # Due to internal timers it is safer to wait after sending to not overwhelm the device
+        device.ws_req_id += 1
 
         # Since we do not look for events we should not leave a hanging SUBSCRIBE on the websocket
+        # This is best done right after the SUBSCRIBE, so as little EVENT data gets transmitted
         if unsubscribe_needed:
-            device.ws_req_id += 1
             unsubscribe_request: dict[str, Any] = {
                 "type": "UNSUBSCRIBE",
                 "reqId": device.ws_req_id,
@@ -78,22 +84,59 @@ def send_request(
                 f"Sending request to {device.host} with payload {unsubscribe_request}"
             )
             device.ws.send(json.dumps(unsubscribe_request))
-        device.ws_req_id += 1
-        message = device.ws.recv()
+            sleep(
+                WS_EXECUTION_DELAY
+            )  # Due to internal timers it is safer to wait after sending to not overwhelm the device
+            device.ws_req_id += 1
+
         # Create a more proper message filtering
         waiting_for_reply = True
         while waiting_for_reply:
-            try:
-                if json.loads(message)["reqId"] == expected_reqest_id:
-                    waiting_for_reply = False
+            message = device.ws.recv()
+            logger.debug(f"Received response {message}")
+            message_data = json.loads(message)
+            if message_data["type"] != "EVENT":
+                if message_data["type"] == "PONG":
+                    device._pong_queue.append(message_data)
                 else:
+                    device._request_queue.append(message_data)
+                try:
+                    if message_data["reqId"] == expected_reqest_id:
+                        waiting_for_reply = False
+                        logger.debug(
+                            f"Processing correct request {message_data['reqId']}"
+                        )
+                        break
+                    elif message_data["reqId"] > expected_reqest_id:
+                        match = next(
+                            (
+                                dq_req_id
+                                for dq_req_id in device._request_queue
+                                if dq_req_id.get("reqId") == expected_reqest_id
+                            ),
+                            None,
+                        )
+                        if match:
+                            logger.debug(
+                                f"Processing correct request {message_data['reqId']}"
+                            )
+                            break
+                        else:
+                            raise NotImplementedError
+
+                    else:
+                        logger.debug(
+                            f"Processing wrong message: [{message_data['reqId']}], continuing to next one."
+                        )
+                except KeyError:
+                    # We shouldn't be able to get here with queuing since we filter EVENTs completely now
                     logger.debug(f"Throwing away websocket message: {message}")
-                    message = device.ws.recv()
-            except KeyError:
-                logger.debug(f"Throwing away websocket message: {message}")
-                message = device.ws.recv()
-        logger.debug(f"Received response from {device.host} with payload {message}")
-        return json.loads(message)
+                    continue
+
+        if message_data:
+            return message_data
+        else:
+            return json.loads(message)
     except Exception as e:
         raise CommunicationError(f"Failed to send request to {device.host}", str(e))
 

@@ -1,3 +1,9 @@
+--- Version 0.2.0 ---
+
+WARNING: This version contains major changes to support newest firmware as well as future firmware releases
+and therefore includes many possibly breaking changes. Where applicable those changes have been marked BC: 
+
+
 --- Version 0.1.1 ---
 
 - Fully transitioned the project to pyproject.toml configuration

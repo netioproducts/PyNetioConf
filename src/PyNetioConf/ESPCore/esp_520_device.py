@@ -8,8 +8,14 @@ import json
 import os
 import ssl
 import sys
+from collections import deque
 from io import BytesIO
 from time import sleep
+
+from ..constants import (
+    DEFAULT_KEEP_ALIVE_QUEUE_LEN,
+    DEFAULT_REQUEST_QUEUE_LEN,
+)
 
 if sys.version_info >= (3, 12):
     from typing import IO, Any, AnyStr, Dict, List, Tuple, override
@@ -31,10 +37,7 @@ from . import esp_api, ws_api
 from .esp_500_device import ESP500Device
 
 
-class ESP520Device(
-    ESP500Device
-    # NETIODevice
-):  # TODO: Make sure we inherit from ESP400Device on release
+class ESP520Device(ESP500Device):
     """
     A class to control ESP devices with the firmware 5.2.x.
     """
@@ -93,6 +96,9 @@ class ESP520Device(
             from urllib3.exceptions import InsecureRequestWarning
 
             disable_warnings(category=InsecureRequestWarning)
+
+        self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
+        self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
 
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
@@ -244,3 +250,7 @@ class ESP520Device(
             raise CommunicationError("Coudln't get updated instance.")
 
         return updated_instance
+
+    @override
+    def import_config(self, file, **kwargs):
+        pass
