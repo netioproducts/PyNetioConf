@@ -25,7 +25,7 @@
 
           src = ./.;
 
-          build-system = [ python.pkgs.setuptools ];
+          build-system = [ python.pkgs.uv-build ];
 
           dependencies = with python.pkgs; [
             websocket-client
@@ -57,15 +57,20 @@
                 requests
                 urllib3
                 typing-extensions
-                setuptools
-                build
-                pip
               ]
             ))
+            pkgs.uv
+            pkgs.ruff
+            pkgs.pyright
           ];
+
+          env.UV_PYTHON_DOWNLOADS = "never";
 
           shellHook = ''
             export PYTHONPATH="$PWD/src''${PYTHONPATH:+:$PYTHONPATH}"
+            if [ -d .venv/bin ]; then
+              ln -sf ${pkgs.ruff}/bin/ruff .venv/bin/ruff
+            fi
           '';
         };
       }

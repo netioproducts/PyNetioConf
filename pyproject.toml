@@ -11,7 +11,8 @@ maintainers = [
 
 description = "Universal module to control and configure all NETIO device"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["NETIO"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -20,7 +21,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Natural Language :: English",
@@ -38,8 +38,54 @@ dependencies = [
 Homepage = "https://netio-products.com/"
 Repository = "https://github.com/netioproducts/PyNetioConf"
 Issues = "https://github.com/netioproducts/PyNetioConf/issues"
-Chanegelog = "https://github.com/netioproducts/PyNetioConf/blob/main/CHANGELOG.txt"
+Changelog = "https://github.com/netioproducts/PyNetioConf/blob/main/CHANGELOG.txt"
 
 [build-system]
-requires = ["setuptools >= 70.0"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build >= 0.11, < 0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "PyNetioConf"
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # basic style
+    "F",        # errors
+    "I",        # imports
+    "B",        # bugbear
+    "S",        # security
+    "UP",       # modern syntax
+    "SIM",      # sim
+    "RET",      # return
+    "T20",      # no prints
+    "T10",      # no forgotten breakpoints (replaces the debug-statements hook)
+    "RUF",      # ruff
+    "N",        # Naming
+    "A",
+    "DTZ",
+    "RSE",
+]
+fixable = ["ALL"]
+unfixable = []
+ignore = ["S101", "T201", "N999", "N815", "N802", "S607", "S603", "N801", "S312", "A002"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-line-length = "dynamic"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.8",
+]
