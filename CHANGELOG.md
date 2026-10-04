@@ -7,7 +7,7 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ## [Unreleased]
 
-## [0.3.0b1] - YYYY-MM-DD
+## [0.3.0b1] - 2026-10-05
 
 First public release, published to PyPI as a beta.
 

@@ -1,6 +1,6 @@
 [project]
 name = "PyNetioConf"
-version = "0.3.0b1.dev1"
+version = "0.3.0b1"
 requires-python = ">= 3.10"
 authors = [
     { name = "NETIO products a.s.", email = "support@netio.eu" }
