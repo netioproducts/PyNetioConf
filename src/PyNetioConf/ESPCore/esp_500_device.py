@@ -9,8 +9,15 @@ import ssl
 import sys
 from collections import deque
 from io import BytesIO
-from time import sleep
+from time import perf_counter, sleep
 from xml.etree.ElementTree import Element
+
+from PyNetioConf.constants import (
+    CLOUD_ACTION_COMMUNICATION_DELAY,
+    CLOUD_DEFAULT_CONNECTION_WAIT,
+    DEVICE_RESET_GRACE_PERIOD,
+    WS_DEFAULT_TIMEOUT,
+)
 
 if sys.version_info >= (3, 12):
     from typing import IO, Any, AnyStr, Dict, List, Tuple, override
@@ -27,10 +34,29 @@ from websocket import WebSocket
 
 from .. import NetioManager
 from ..constants import DEFAULT_KEEP_ALIVE_QUEUE_LEN, DEFAULT_REQUEST_QUEUE_LEN
-from ..exceptions import CommunicationError, ElementNotFound, InvalidSocketIndex
+from ..exceptions import (
+    CommunicationError,
+    ElementNotFound,
+    InvalidParameterValueError,
+    InvalidSocketIndex,
+)
 from ..netio_device import NETIODevice
 from . import esp_api, ws_api
 from .esp_400_device import ESP400Device
+
+
+def _value_or_current(value: Any, current: dict[str, Any], key: str) -> Any:
+    """Returns value, or the device's current value for key when value is None."""
+    return value if value is not None else current[key]
+
+
+def _auth_or_current(
+    auth: tuple[str, str] | None, current: dict[str, Any], prefix: str
+) -> tuple[str, str]:
+    """Returns auth, or the device's current (username, password) when auth is None."""
+    if auth is not None:
+        return auth
+    return current[f"{prefix}Username"], current[f"{prefix}Password"]
 
 
 class ESP500Device(NETIODevice):
@@ -128,23 +154,78 @@ class ESP500Device(NETIODevice):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
+        self._ws_helo_data = kwargs.get(
+            "ws_helo_data", ws_api.send_request(self, "HELO")
+        )
 
     def _keep_alive(self) -> None:
-        # TODO: Implement WebSocket keep-alive logic for 5.0.0+ firmware
-        self.logger.debug(f"Keep-alive stub called for device {self.host}")
+        self.logger.debug(
+            f"Keep-alive stub called for device {self.host}, keep-alive functianolity is restored on devices running 5.2.x and up, please update."
+        )
 
+    @override
     def login(self, username: str, password: str, logout: bool = False) -> str:
         if logout:
             self.ws = None  # Disables a connection if one was present, the device handles the logout automatically
 
         if self.ws is None:
-            if self.use_https:
-                self.ws = websocket.create_connection(
-                    f"wss://{self.host}/emweb", sslopt=self.ssl_options
-                )  # pyright: ignore[reportUnknownMemberType]
-            else:
-                self.ws = websocket.create_connection(f"ws://{self.host}/emweb")  # pyright: ignore
+            try:
+                # If the KA thread is alive it can send requests while the device is reconnecting on the old pipe.
+                if self._ka_thread:
+                    self._ka_thread.cancel()
+                    self._ka_thread.join()
+                    self.logger.debug(
+                        "Disabled keep-alive thread due to new login process."
+                    )
+            except AttributeError:
+                pass  # No need to clean up a non existant thread
+
+            try_count = 3
+            self.logger.debug(f"Attempting websocket connection to {self.host}")
+            for attempt in range(try_count):
+                self.logger.debug(
+                    f"{self.host} websocket connection attempt {attempt + 1}/{try_count}"
+                )
+                try:
+                    connection_dt_start = perf_counter()
+                    if self.use_https:
+                        self.ws = websocket.create_connection(
+                            f"wss://{self.host}/emweb",
+                            sslopt=self.ssl_options,
+                            timeout=10,
+                        )  # pyright: ignore[reportUnknownMemberType]
+                    else:
+                        self.ws = websocket.create_connection(
+                            f"ws://{self.host}/emweb", timeout=10
+                        )  # pyright: ignore[reportUnknownMemberType]
+
+                    if isinstance(self.ws, WebSocket):
+                        self.logger.debug(f"Succesfully connected to {self.host}")
+                        break
+                    else:
+                        elapsed_time = perf_counter() - connection_dt_start
+                        if elapsed_time < 10:
+                            self.logger.debug(
+                                "Couldn't establish ws connection in time, waiting to reconnect."
+                            )
+                            sleep(10 - elapsed_time)
+                except Exception as e:
+                    self.logger.debug(
+                        f"Connection to {self.host} failed on {attempt + 1}/{try_count}"
+                    )
+                    sleep(1)
+                    continue
+
+            if isinstance(self.ws, WebSocket):
+                self.logger.debug(f"Setting default timeout for {self.host}.")
+                self.ws.settimeout(WS_DEFAULT_TIMEOUT)
+
             self.ws_req_id = 0
+
+            if self._keep_alive_flag:
+                self._ka_thread = threading.Timer(120, self._keep_alive)
+                self._ka_thread.daemon = True
+                self._ka_thread.start()
 
         hello_response = ws_api.send_request(self, "HELO")
 
@@ -160,6 +241,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def logout(self) -> None:
+        self.logger.debug(f"Logging out of device {self.host}")
         self.ws = None
         self.ws_req_id = 0
 
@@ -171,9 +253,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"users/name/{self.username}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get current user data: {error_msg}")
         return response.get("data", {})
 
     @override
@@ -184,18 +263,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"users/name/{username}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            if (
-                "not found" in error_msg.lower()
-                or "does not exist" in error_msg.lower()
-            ):
-                raise ElementNotFound(
-                    f"User {username} not found on device {self.host}"
-                )
-            raise CommunicationError(
-                f"Failed to get user privileges for {username}: {error_msg}"
-            )
         data = response.get("data")
         if not data:
             raise ElementNotFound(f"User {username} not found on device {self.host}")
@@ -204,11 +271,13 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_users(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "users/list"
+
         self.logger.debug(f"Fetching users list on device {self.host}")
-        current_user_data = self.get_current_user()
-        if current_user_data:
-            return {self.username: current_user_data}
-        return {}
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        items = response.get("data", {}).get("items", [])
+        return {item["name"]: item for item in items if "name" in item}
 
     @override
     def create_user(
@@ -246,10 +315,7 @@ class ESP500Device(NETIODevice):
             "passwordHash": password_hash,
             "privileges": privileges_dict,
         }
-        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to create user {username}: {error_msg}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def remove_user(self, username: str) -> None:
@@ -257,10 +323,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SET"
         ws_topic = "users/delete"
         ws_data = {"name": username}
-        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to remove user {username}: {error_msg}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def get_system_info(self) -> dict[str, Any]:
@@ -275,15 +338,16 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "system/uptime"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get uptime: {error_msg}")
         return int(response.get("data", {}).get("uptime", 0))
 
+    @override
     def get_version_detailed(self) -> str:
+        self.logger.debug(f"Fetching detailed firmware version from device {self.host}")
         return self.get_system_info()["fwVersion"]
 
+    @override
     def get_version(self) -> str:
+        self.logger.debug(f"Fetching firmware version from device {self.host}")
         return self.get_version_detailed().split("-")[0].strip()
 
     @override
@@ -294,11 +358,6 @@ class ESP500Device(NETIODevice):
             f"Fetching output configuration data for output id {output_id} on {self.host}"
         )
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(
-                f"Failed to get output data for output {output_id}: {error_msg}"
-            )
         return response.get("data", {})
 
     def _set_output_config(
@@ -313,26 +372,36 @@ class ESP500Device(NETIODevice):
     ) -> None:
         ws_type = "SET"
         ws_topic = f"outputs/id/{output_id}/config"
-        old_output_data = self.get_output_data(output_id)
+
+        self.logger.debug(f"Setting output {output_id} config on device {self.host}")
+        current = self._require_config(
+            self.get_output_data(output_id), f"output {output_id}"
+        )
         ws_data = {
-            "default": default_state
-            if default_state is not None
-            else old_output_data["default"],
-            "isScheduleActive": is_schedule_active
-            if is_schedule_active is not None
-            else old_output_data["isScheduleActive"],
-            "name": output_name if output_name is not None else old_output_data["name"],
-            "powerUpInterval": power_up_interval
-            if power_up_interval is not None
-            else old_output_data["powerUpInterval"],
-            "resetDelay": reset_delay
-            if reset_delay is not None
-            else old_output_data["resetDelay"],
-            "scheduleId": schedule_id
-            if schedule_id is not None
-            else old_output_data["scheduleId"],
+            "default": _value_or_current(default_state, current, "default"),
+            "isScheduleActive": _value_or_current(
+                is_schedule_active, current, "isScheduleActive"
+            ),
+            "name": _value_or_current(output_name, current, "name"),
+            "powerUpInterval": _value_or_current(
+                power_up_interval, current, "powerUpInterval"
+            ),
+            "resetDelay": _value_or_current(reset_delay, current, "resetDelay"),
+            "scheduleId": _value_or_current(schedule_id, current, "scheduleId"),
         }
-        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    def _require_config(
+        self, current: dict[str, Any], config_name: str
+    ) -> dict[str, Any]:
+        if not current:
+            message = (
+                f"Device {self.host} returned no {config_name} configuration, "
+                "settings were left unchanged"
+            )
+            self.logger.error(message)
+            raise CommunicationError(message)
+        return current
 
     def _check_socket_index(self, socket_index: int) -> None:
         if socket_index < 1 or socket_index > self.output_count:
@@ -341,17 +410,26 @@ class ESP500Device(NETIODevice):
                 f" the device supports <1;{self.output_count}>."
             )
 
+    @override
     def rename_output(self, output_id: int, output_name: str) -> None:
         self.logger.debug(f"Renaming output {output_id} to new name: {output_name}")
         self._set_output_config(output_id, output_name=output_name)
 
+    @override
     def set_output(self, output_id: int, state: bool) -> None:
+        ws_type = "SET"
+        ws_topic = f"outputs/id/{output_id}/ctrl"
+        ws_data = {"request": "on" if state else "off"}
+
         self._check_socket_index(output_id)
+        self.logger.debug(
+            f"Setting output {output_id} to {state} on device {self.host}"
+        )
         ws_api.send_request(
             self,
-            "SET",
-            f"outputs/id/{output_id}/ctrl",
-            {"request": "on" if state else "off"},
+            ws_type,
+            ws_topic,
+            ws_data,
         )
         self.logger.debug(
             f"Setting output {output_id} on device {self.host} to {state}."
@@ -371,21 +449,20 @@ class ESP500Device(NETIODevice):
 
     @override
     def reset_output_consumption_counter(self, output_id: int) -> None:
+        ws_type = "SET"
+        ws_topic = f"outputs/id/{output_id}/resetOutputConsumption"
+        ws_data = {"request": True}
+
         self._check_socket_index(output_id)
         self.logger.debug(
             f"Resetting power consumption counters for output {output_id} on device {self.host}"
         )
-        response = ws_api.send_request(
+        ws_api.send_request(
             self,
-            "SET",
-            f"outputs/id/{output_id}/resetOutputConsumption",
-            {"request": True},
+            ws_type,
+            ws_topic,
+            ws_data,
         )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(
-                f"Failed to reset power consumption counters for output {output_id}: {error_msg}"
-            )
 
     @override
     def reset_power_consumption_counters(self) -> None:
@@ -398,6 +475,9 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_output_schedule(self, output_id: int) -> dict[str, Any]:
+        self.logger.debug(
+            f"Fetching output {output_id} schedule from device {self.host}"
+        )
         output_data = self.get_output_data(output_id)
         return {
             "id": output_data.get("scheduleId", 0),
@@ -406,11 +486,14 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_output_schedule_id(self, output_id: int) -> int:
+        self.logger.debug(
+            f"Fetching output {output_id} schedule ID from device {self.host}"
+        )
         return int(self.get_output_schedule(output_id)["id"])
 
     @override
     def set_output_schedule(
-        self, output_id: int, schedule_id: int, enabled: bool = True
+        self, output_id: int, schedule_id: int, enabled: bool | None = None
     ) -> None:
         self.logger.debug(
             f"Setting output {output_id} schedule to schedule ID {schedule_id} (active={enabled}) on {self.host}"
@@ -428,8 +511,11 @@ class ESP500Device(NETIODevice):
 
     @override
     def set_output_schedule_by_name(
-        self, output_id: int, schedule_name: str, enabled: bool = True
+        self, output_id: int, schedule_name: str, enabled: bool | None = None
     ) -> None:
+        self.logger.debug(
+            f"Setting output {output_id} schedule to '{schedule_name}' on {self.host}"
+        )
         schedule_id = self.get_schedule_id(schedule_name)
         self.set_output_schedule(output_id, schedule_id, enabled)
 
@@ -437,6 +523,8 @@ class ESP500Device(NETIODevice):
         self, enable: bool, name: str, config: dict[str, Any], topic: str
     ) -> None:
         ws_type = "SET"
+
+        self.logger.debug(f"Creating '{name}' via {topic} on device {self.host}")
         rule_data = {
             "enabled": enable,
             "name": name,
@@ -462,9 +550,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "rules/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get rules: {error_msg}")
         return response.get("data", {}).get("items", [])
 
     @override
@@ -473,17 +558,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"rules/name/{rule_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            if (
-                "not found" in error_msg.lower()
-                or "does not exist" in error_msg.lower()
-            ):
-                raise ElementNotFound(
-                    f"Rule {rule_name} not found on device {self.host}"
-                )
-            raise CommunicationError(f"Failed to get rule {rule_name}: {error_msg}")
-
         data = response.get("data")
         if not data:
             raise ElementNotFound(f"Rule {rule_name} not found on device {self.host}")
@@ -518,9 +592,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "pab/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get PABs: {error_msg}")
         return response.get("data", {}).get("items", [])
 
     @override
@@ -529,15 +600,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"pab/name/{pab_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            if (
-                "not found" in error_msg.lower()
-                or "does not exist" in error_msg.lower()
-            ):
-                raise ElementNotFound(f"PAB {pab_name} not found on device {self.host}")
-            raise CommunicationError(f"Failed to get PAB {pab_name}: {error_msg}")
-
         data = response.get("data")
         if not data:
             raise ElementNotFound(f"PAB {pab_name} not found on device {self.host}")
@@ -574,9 +636,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "wdtpingers/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get watchdogs: {error_msg}")
         return response.get("data", {}).get("items", [])
 
     @override
@@ -587,19 +646,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"wdtpingers/name/{watchdog_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            if (
-                "not found" in error_msg.lower()
-                or "does not exist" in error_msg.lower()
-            ):
-                raise ElementNotFound(
-                    f"Watchdog {watchdog_name} not found on device {self.host}"
-                )
-            raise CommunicationError(
-                f"Failed to get watchdog {watchdog_name}: {error_msg}"
-            )
-
         data = response.get("data")
         if not data:
             raise ElementNotFound(
@@ -643,9 +689,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "schedules/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get schedules: {error_msg}")
         return response.get("data", {}).get("items", [])
 
     @override
@@ -656,19 +699,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"schedules/name/{schedule_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            if (
-                "not found" in error_msg.lower()
-                or "does not exist" in error_msg.lower()
-            ):
-                raise ElementNotFound(
-                    f"Schedule {schedule_name} not found on device {self.host}"
-                )
-            raise CommunicationError(
-                f"Failed to get schedule {schedule_name}: {error_msg}"
-            )
-
         data = response.get("data")
         if not data:
             raise ElementNotFound(
@@ -678,6 +708,9 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_schedule_id(self, schedule_name: str) -> int:
+        self.logger.debug(
+            f"Fetching ID of schedule {schedule_name} from device {self.host}"
+        )
         schedules = self.get_schedules()
         for schedule in schedules:
             if schedule.get("name") == schedule_name:
@@ -731,14 +764,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(
             f"Attempting to delete schedule {schedule_name} on device {self.host}."
         )
-        response = ws_api.send_request(self, ws_type, topic, ws_data)
-
-        # Check response for failure
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(
-                f"Failed to delete schedule {schedule_name}: {error_msg}"
-            )
+        ws_api.send_request(self, ws_type, topic, ws_data)
 
     def delete_rule_by_name(self, name: str) -> None:
         # Check for rule existing, error out if it doesn't
@@ -750,12 +776,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SET"
         ws_data = {"name": name}
         self.logger.debug(f"Attempting to delete rule {name} on device {self.host}.")
-        response = ws_api.send_request(self, ws_type, topic, ws_data)
-
-        # Check response for failure
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to delete rule {name}: {error_msg}")
+        ws_api.send_request(self, ws_type, topic, ws_data)
 
     @override
     def delete_pab_by_name(self, pab_name: str) -> None:
@@ -768,12 +789,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SET"
         ws_data = {"name": pab_name}
         self.logger.debug(f"Attempting to delete PAB {pab_name} on device {self.host}.")
-        response = ws_api.send_request(self, ws_type, topic, ws_data)
-
-        # Check response for failure
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to delete PAB {pab_name}: {error_msg}")
+        ws_api.send_request(self, ws_type, topic, ws_data)
 
     @override
     def get_active_protocols(self) -> list[int]:
@@ -781,9 +797,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/info"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get active protocols: {error_msg}")
 
         active_dict = response.get("data", {}).get("active", {})
         active_ids = []
@@ -808,9 +821,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/info"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get supported protocols: {error_msg}")
 
         active_dict = response.get("data", {}).get("active", {})
         protocol_map = {
@@ -834,37 +844,37 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/xml/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get XML API state: {error_msg}")
         return response["data"]
 
     @override
     def set_xml_api_state(
         self,
-        protocol_enabled: bool,
-        read_enable: bool,
-        write_enable: bool,
-        read_auth: tuple[str, str],
-        write_auth: tuple[str, str],
+        protocol_enabled: bool | None = None,
+        read_enable: bool | None = None,
+        write_enable: bool | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/xml/config"
+
         self.logger.debug(f"Setting XML API state on device {self.host}")
+        current = self._require_config(self.get_xml_api_state(), "XML API")
+        read_username, read_password = _auth_or_current(read_auth, current, "read")
+        write_username, write_password = _auth_or_current(write_auth, current, "write")
         protocol_data = {
-            "enable": protocol_enabled,
-            "port": 80,
-            "readOnlyEnable": read_enable,
-            "readUsername": read_auth[0],
-            "readPassword": read_auth[1],
-            "readWriteEnable": write_enable,
-            "writeUsername": write_auth[0],
-            "writePassword": write_auth[1],
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "port": current["port"],
+            "readOnlyEnable": _value_or_current(read_enable, current, "readOnlyEnable"),
+            "readUsername": read_username,
+            "readPassword": read_password,
+            "readWriteEnable": _value_or_current(
+                write_enable, current, "readWriteEnable"
+            ),
+            "writeUsername": write_username,
+            "writePassword": write_password,
         }
-        response = ws_api.send_request(
-            self, "SET", "protocols/xml/config", protocol_data
-        )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set XML API state: {error_msg}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     @override
     def get_json_api_state(self) -> dict[str, Any]:
@@ -872,9 +882,6 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/json/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get JSON API state: {error_msg}")
         return response["data"]
 
     @override
@@ -893,51 +900,40 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/telnet/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get Telnet API state: {error_msg}")
         return response["data"]
 
     @override
     def set_telnet_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         port: int | None = None,
         read_enabled: bool | None = None,
         read_auth: tuple[str, str] | None = None,
         write_enabled: bool | None = None,
         write_auth: tuple[str, str] | None = None,
     ) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/telnet/config"
+
         self.logger.debug(f"Setting Telnet API state on device {self.host}")
-        current = self.get_telnet_api_state()
+        current = self._require_config(self.get_telnet_api_state(), "Telnet API")
+        read_username, read_password = _auth_or_current(read_auth, current, "read")
+        write_username, write_password = _auth_or_current(write_auth, current, "write")
         protocol_data = {
-            "enable": protocol_enabled,
-            "port": port if port is not None else current.get("port", 23),
-            "readOnlyEnable": read_enabled
-            if read_enabled is not None
-            else current.get("readOnlyEnable", True),
-            "readUsername": read_auth[0]
-            if read_auth is not None
-            else current.get("readUsername", ""),
-            "readPassword": read_auth[1]
-            if read_auth is not None
-            else current.get("readPassword", ""),
-            "readWriteEnable": write_enabled
-            if write_enabled is not None
-            else current.get("readWriteEnable", True),
-            "writeUsername": write_auth[0]
-            if write_auth is not None
-            else current.get("writeUsername", "netio"),
-            "writePassword": write_auth[1]
-            if write_auth is not None
-            else current.get("writePassword", "netio"),
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "port": _value_or_current(port, current, "port"),
+            "readOnlyEnable": _value_or_current(
+                read_enabled, current, "readOnlyEnable"
+            ),
+            "readUsername": read_username,
+            "readPassword": read_password,
+            "readWriteEnable": _value_or_current(
+                write_enabled, current, "readWriteEnable"
+            ),
+            "writeUsername": write_username,
+            "writePassword": write_password,
         }
-        response = ws_api.send_request(
-            self, "SET", "protocols/telnet/config", protocol_data
-        )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set Telnet API state: {error_msg}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     @override
     def get_modbus_state(self) -> dict[str, Any]:
@@ -945,35 +941,33 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/modbus/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get Modbus API state: {error_msg}")
         return response["data"]
 
     @override
     def set_modbus_state(
         self,
-        protocol_enabled: bool,
-        port: int = 502,
-        ip_filter_enabled: bool = False,
-        ip_from: str = "0.0.0.0",
-        ip_to: str = "0.0.0.0",
+        protocol_enabled: bool | None = None,
+        port: int | None = None,
+        ip_filter_enabled: bool | None = None,
+        ip_from: str | None = None,
+        ip_to: str | None = None,
     ) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/modbus/config"
+
         self.logger.debug(f"Setting Modbus M2M API state on device {self.host}")
+        current = self._require_config(self.get_modbus_state(), "Modbus M2M API")
         protocol_data = {
-            "enable": protocol_enabled,
-            "port": port,
-            "lastIp": "0.0.0.0",
-            "ipFilterEnable": ip_filter_enabled,
-            "ipFrom": ip_from,
-            "ipTo": ip_to,
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "port": _value_or_current(port, current, "port"),
+            "lastIp": current["lastIp"],
+            "ipFilterEnable": _value_or_current(
+                ip_filter_enabled, current, "ipFilterEnable"
+            ),
+            "ipFrom": _value_or_current(ip_from, current, "ipFrom"),
+            "ipTo": _value_or_current(ip_to, current, "ipTo"),
         }
-        response = ws_api.send_request(
-            self, "SET", "protocols/modbus/config", protocol_data
-        )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set Modbus state: {error_msg}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     @override
     def get_netio_push_api_state(self) -> dict[str, Any]:
@@ -981,41 +975,38 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/push/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get Push API state: {error_msg}")
         return response["data"]
 
     @override
     def set_netio_push_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         url: str | None = None,
         push_protocol: str | None = None,
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/push/config"
+
         self.logger.debug(f"Setting Netio Push API state on device {self.host}")
-        current = self.get_netio_push_api_state()
-        protocol_data = {
-            "enable": protocol_enabled,
-            "url": url
-            if url is not None
-            else current.get("url", "http://test.example.com:80/push"),
-            "protocol": (
-                push_protocol.upper()
-                if push_protocol is not None
-                else current.get("protocol", "JSON")
-            ),
-            "delta": delta if delta is not None else current.get("delta", 0),
-            "period": period if period is not None else current.get("period", 60),
-        }
-        response = ws_api.send_request(
-            self, "SET", "protocols/push/config", protocol_data
+        if push_protocol is not None and push_protocol.upper() not in ("JSON", "XML"):
+            raise InvalidParameterValueError(
+                f"push_protocol must be 'json' or 'xml', got {push_protocol!r}"
+            )
+        current = self._require_config(
+            self.get_netio_push_api_state(), "Netio Push API"
         )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set Push API state: {error_msg}")
+        protocol_data: dict[str, Any] = {
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "url": _value_or_current(url, current, "url"),
+            "delta": _value_or_current(delta, current, "delta"),
+            "period": _value_or_current(period, current, "period"),
+        }
+        # The device doesn't report the push format, so only send it when given.
+        if push_protocol is not None:
+            protocol_data["protocol"] = push_protocol.upper()
+        _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     @override
     def get_snmp_api_state(self) -> dict[str, Any]:
@@ -1023,15 +1014,12 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/snmp/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get SNMP API state: {error_msg}")
         return response["data"]
 
     @override
     def _set_snmp_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None,
         version: str,
         location: str | None = None,
         community_read: str | None = None,
@@ -1043,53 +1031,39 @@ class ESP500Device(NETIODevice):
         priv_protocol: str | None = None,
         priv_key: str | None = None,
     ) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/snmp/config"
+
         self.logger.debug(f"Setting SNMP API state on device {self.host}")
-        current_state = self.get_snmp_api_state()
+        current = self._require_config(self.get_snmp_api_state(), "SNMP API")
         ver = "v1-2" if version in ("v1,2c", "v1-2") else "v3"
 
         request_data = {
-            "enable": protocol_enabled,
-            "location": location
-            if location is not None
-            else current_state.get("location", "Unknown"),
-            "communityRead": community_read
-            if community_read is not None
-            else current_state.get("communityRead", "public"),
-            "communityWrite": community_write
-            if community_write is not None
-            else current_state.get("communityWrite", "private"),
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "location": _value_or_current(location, current, "location"),
+            "communityRead": _value_or_current(
+                community_read, current, "communityRead"
+            ),
+            "communityWrite": _value_or_current(
+                community_write, current, "communityWrite"
+            ),
             "version": ver,
-            "securityName": security_name
-            if security_name is not None
-            else current_state.get("securityName", "netio"),
-            "authAlgo": auth_protocol
-            if auth_protocol is not None
-            else current_state.get("authAlgo", "SHA"),
-            "authKey": auth_key
-            if auth_key is not None
-            else current_state.get("authKey", "netio"),
-            "encryptAlgo": priv_protocol
-            if priv_protocol is not None
-            else current_state.get("encryptAlgo", "AES"),
-            "encryptKey": priv_key
-            if priv_key is not None
-            else current_state.get("encryptKey", "netio"),
-            "securityLevel": security_level
-            if security_level is not None
-            else current_state.get("securityLevel", "authPriv"),
+            "securityName": _value_or_current(security_name, current, "securityName"),
+            "authAlgo": _value_or_current(auth_protocol, current, "authAlgo"),
+            "authKey": _value_or_current(auth_key, current, "authKey"),
+            "encryptAlgo": _value_or_current(priv_protocol, current, "encryptAlgo"),
+            "encryptKey": _value_or_current(priv_key, current, "encryptKey"),
+            "securityLevel": _value_or_current(
+                security_level, current, "securityLevel"
+            ),
         }
 
-        response = ws_api.send_request(
-            self, "SET", "protocols/snmp/config", request_data
-        )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set SNMP API state: {error_msg}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, request_data)
 
     @override
     def set_snmp_v1_2_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         location: str | None = None,
         community_read: str | None = None,
         community_write: str | None = None,
@@ -1106,7 +1080,7 @@ class ESP500Device(NETIODevice):
     @override
     def set_snmp_v3_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         location: str | None = None,
         security_name: str | None = None,
         security_level: str | None = None,
@@ -1130,99 +1104,126 @@ class ESP500Device(NETIODevice):
 
     def set_json_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         read_enable: bool | None = None,
         write_enable: bool | None = None,
         read_auth: tuple[str, str] | None = None,
         write_auth: tuple[str, str] | None = None,
     ) -> None:
-        old_protocol_data = self.get_json_api_state()
+        ws_type = "SET"
+        ws_topic = "protocols/json/config"
+        current = self._require_config(self.get_json_api_state(), "JSON API")
+        read_username, read_password = _auth_or_current(read_auth, current, "read")
+        write_username, write_password = _auth_or_current(write_auth, current, "write")
 
         protocol_data = {
-            "enable": protocol_enabled,
-            "port": 80,
-            "readOnlyEnable": read_enable
-            if read_enable is not None
-            else old_protocol_data["read"]["enable"],
-            "readUsername": read_auth[0]
-            if read_auth is not None
-            else old_protocol_data["read"]["username"],
-            "readPassword": read_auth[1]
-            if read_auth is not None
-            else old_protocol_data["read"]["password"],
-            "readWriteEnable": write_enable
-            if write_enable is not None
-            else old_protocol_data["write"]["enable"],
-            "writeUsername": write_auth[0]
-            if write_auth is not None
-            else old_protocol_data["write"]["username"],
-            "writePassword": write_auth[1]
-            if write_auth is not None
-            else old_protocol_data["write"]["password"],
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "port": current["port"],
+            "readOnlyEnable": _value_or_current(read_enable, current, "readOnlyEnable"),
+            "readUsername": read_username,
+            "readPassword": read_password,
+            "readWriteEnable": _value_or_current(
+                write_enable, current, "readWriteEnable"
+            ),
+            "writeUsername": write_username,
+            "writePassword": write_password,
         }
         self.logger.debug(f"Setting json api state on device {self.host}.")
-        self.logger.debug(f"JSON configuration: {json.dumps(protocol_data, indent=4)}")
-        ws_api.send_request(self, "SET", "protocols/json/config", protocol_data)
+        logged_data = {
+            key: "***" if "Password" in key else value
+            for key, value in protocol_data.items()
+        }
+        self.logger.debug(f"JSON configuration: {json.dumps(logged_data, indent=4)}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     def get_urlapi_state(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/url/config"
+
         self.logger.debug(f"Getting urlapi state on device {self.host}.")
-        response = ws_api.send_request(self, "SUBSCRIBE", "protocols/url/config")
+        response = ws_api.send_request(self, ws_type, ws_topic)
         return response["data"]
 
     def set_urlapi_state(
-        self, protocol_enabled: bool, write_enable: bool, write_password: str
+        self,
+        protocol_enabled: bool | None = None,
+        write_enable: bool | None = None,
+        write_password: str | None = None,
     ) -> None:
-        old_protocol_data = self.get_urlapi_state()
-        protocol_data = {
-            "enable": protocol_enabled,
-            "port": 80,
-            "writeEnable": write_enable,
-            "password": write_password,
-        }
-        ws_api.send_request(self, "SET", "protocols/url/config", protocol_data)
+        ws_type = "SET"
+        ws_topic = "protocols/url/config"
 
-    def get_output_states(self) -> list[tuple[int, bool]]:
-        socket_list = ws_api.send_request(self, "SUBSCRIBE", "outputs/measure")
-        return [
-            (socket["id"], socket["state"] == "on")
-            for socket in socket_list["data"]["items"]
-        ]
+        self.logger.debug(f"Setting urlapi state on device {self.host}.")
+        current = self._require_config(self.get_urlapi_state(), "URL API")
+        protocol_data = {
+            "enable": _value_or_current(protocol_enabled, current, "enable"),
+            "port": current["port"],
+            "writeEnable": _value_or_current(write_enable, current, "writeEnable"),
+            "password": _value_or_current(write_password, current, "password"),
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     def get_measurement(self):
-        return ws_api.send_request(self, "SUBSCRIBE", "outputs/measure")
+        ws_type = "SUBSCRIBE"
+        ws_topic = "outputs/measure"
+
+        self.logger.debug(f"Fetching raw measurements from device {self.host}")
+        return ws_api.send_request(self, ws_type, ws_topic)
 
     def upload_mqtt_client_key(self, key: str) -> None:
-        upload_path = ws_api.send_request(
-            self, "SET", "protocols/mqtt/clientkeyupload", {}
-        )["data"]["uploadPath"]
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/clientkeyupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadPath"
+        ]
         _ = esp_api.send_file(self, upload_path, key)
         sleep(0.1)
 
     def upload_mqtt_client_certificate(self, cert: str) -> None:
-        upload_path = ws_api.send_request(
-            self, "SET", "protocols/mqtt/clientcertupload", {}
-        )["data"]["uploadPath"]
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/clientcertupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadPath"
+        ]
         _ = esp_api.send_file(self, upload_path, cert)
         sleep(0.1)
 
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
-        upload_path = ws_api.send_request(
-            self, "SET", "protocols/mqtt/cacertupload", {}
-        )["data"]["uploadPath"]
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/cacertupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadPath"
+        ]
         _ = esp_api.send_file(self, upload_path, ca)
         sleep(0.1)
 
     def get_mqttflex_state(self) -> dict:
-        return ws_api.send_request(self, "SUBSCRIBE", "protocols/mqtt/config")["data"]
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/mqtt/config"
+
+        self.logger.debug(f"Getting MQTT flex state on device {self.host}")
+        return ws_api.send_request(self, ws_type, ws_topic)["data"]
 
     @override
-    def get_outputs_data(self) -> list[dict[int, dict[str, Any]]]:
-        return ws_api.send_request(self, "SUBSCRIBE", "outputs/measure")["data"][
-            "items"
-        ]
+    def get_outputs_data(self) -> list[dict[str, Any]]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "outputs/measure"
+
+        self.logger.debug(f"Fetching outputs measurement data from device {self.host}")
+        return ws_api.send_request(self, ws_type, ws_topic)["data"]["items"]
 
     @override
     def get_output_states(self) -> list[tuple[int, bool]]:
+        self.logger.debug(f"Fetching output states from device {self.host}")
         output_data = self.get_outputs_data()
         output_states = []
         for output in output_data:
@@ -1233,19 +1234,23 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_output_state(self, output_id: int) -> bool:
+        self.logger.debug(f"Fetching output {output_id} state from device {self.host}")
         return self.get_output_states()[output_id - 1][1]  # TODO: Polish
 
     def set_mqttflex_state(
-        self, state: bool, config: dict[str, Any] | None = None
+        self, state: bool | None = None, config: dict[str, Any] | None = None
     ) -> None:
-        if config is None:
-            config = self.get_mqttflex_state()["config"]
-        ws_api.send_request(
-            self,
-            "SET",
-            "protocols/mqtt/config",
-            {"enable": state, "config": json.dumps(config)},
-        )
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/config"
+
+        self.logger.debug(f"Setting MQTT flex state to {state} on device {self.host}")
+        current = self._require_config(self.get_mqttflex_state(), "MQTT flex")
+        ws_data = {
+            "enable": _value_or_current(state, current, "enable"),
+            # The device returns the config JSON-encoded; only encode a given dict.
+            "config": json.dumps(config) if config is not None else current["config"],
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
         sleep(1)
 
     def upload_https_private_key(self, keyfile: str) -> None:
@@ -1270,14 +1275,23 @@ class ESP500Device(NETIODevice):
             endpoint = endpoint_data["data"]["uploadPath"]
             esp_api.send_file(self, endpoint, f)
 
-    def export_config(self, save_file: str = None) -> dict:
-        config = ws_api.send_request(self, "SET", "system/cfgexport", data={})
+    def export_config(self, save_file: str | None = None) -> dict[str, Any]:
+        ws_type = "SET"
+        ws_topic = "system/cfgexport"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Exporting configuration from device {self.host}")
+        config = ws_api.send_request(self, ws_type, ws_topic, ws_data)
         if save_file:
             with open(save_file, "w") as file:
                 json.dump(config["data"]["config"], file)
         return config["data"]["config"]
 
     def import_config(self, file, **kwargs) -> None:
+        ws_type = "SET"
+        ws_topic = "system/cfgimport"
+        ws_data: dict[str, Any] = {}
+
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError(
                 "You don't have permission to alter settings on this device."
@@ -1285,9 +1299,10 @@ class ESP500Device(NETIODevice):
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
+        self.logger.debug(f"Importing configuration to device {self.host}")
         data = json.load(file)
         encoded_data = json.dumps(data).encode("utf-8")
-        ws_api.send_request(self, "SET", "system/cfgimport", data={})
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
         esp_api.send_file(self, "/cfgimport", encoded_data)
         self.logger.info(
             f"Imported configuration from {file.name}, device {self.host} is restarting..."
@@ -1366,11 +1381,14 @@ class ESP500Device(NETIODevice):
         return updated_instance
 
     def get_features(self) -> dict[str, Any]:
+        self.logger.debug(f"Fetching supported features from device {self.host}")
         return self.get_system_info()
 
     @override
     def ping(self) -> bool:
-        # TODO: Make a proper ping like utility to not force new HTTP connection
+        self.logger.warning(
+            "Device pinging is not supported on 5.0.x to 5.1.x, please update your device."
+        )
         return True
 
     @override
@@ -1407,46 +1425,64 @@ class ESP500Device(NETIODevice):
 
     @override
     def set_wifi_static_address(
-        self, address: str, net_mask: str, gateway: str, dns_server: str, hostname: str
+        self,
+        address: str | None = None,
+        net_mask: str | None = None,
+        gateway: str | None = None,
+        dns_server: str | None = None,
+        hostname: str | None = None,
     ) -> None:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "network/netwifi/config"
+
         self.logger.debug(f"Setting Wi-Fi static address on device {self.host}")
-        netwifi_res = ws_api.send_request(self, "SUBSCRIBE", "network/netwifi/config")
-        netwifi_data = netwifi_res.get("data", {})
-        netwifi_data["networkMode"] = "static"
-        netwifi_data["ip"] = address
-        netwifi_data["netmask"] = net_mask
-        netwifi_data["gateway"] = gateway
-        netwifi_data["dns"] = dns_server
-        response = ws_api.send_request(
-            self, "SET", "network/netwifi/config", netwifi_data
+        if hostname is not None:
+            self.logger.warning(
+                f"The hostname of device {self.host} is taken from the device name "
+                "on 5.0.0+ firmware and was not changed, use rename_device to change it"
+            )
+        netwifi_res = ws_api.send_request(self, ws_type, ws_topic)
+        netwifi_data = self._require_config(
+            netwifi_res.get("data", {}), "Wi-Fi network"
         )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set Wi-Fi static address: {error_msg}")
+        if netwifi_data["networkMode"] != "static" and None in (
+            address,
+            net_mask,
+            gateway,
+        ):
+            raise InvalidParameterValueError(
+                "address, net_mask and gateway are required when switching Wi-Fi "
+                "from DHCP to a static address"
+            )
+        netwifi_data["networkMode"] = "static"
+        if address is not None:
+            netwifi_data["ip"] = address
+        if net_mask is not None:
+            netwifi_data["netmask"] = net_mask
+        if gateway is not None:
+            netwifi_data["gateway"] = gateway
+        if dns_server is not None:
+            netwifi_data["dns"] = dns_server
+
+        ws_type = "SET"
+        _ = ws_api.send_request(self, ws_type, ws_topic, netwifi_data)
 
     @override
     def get_version_revision(self) -> str:
+        self.logger.debug(f"Fetching firmware revision from device {self.host}")
         return self.get_system_info()["fwRevision"]
 
     @override
     def set_periodic_restart(
-        self, enable: bool, restart_period: int | None = None
+        self, enable: bool | None = None, restart_period: int | None = None
     ) -> None:
         self.logger.debug(f"Setting periodic restart on device {self.host}")
-        cfg_res = ws_api.send_request(self, "SUBSCRIBE", "system/config")
-        cfg_data = cfg_res.get("data", {})
-        cfg_data["periodRestartEnable"] = enable
-        if restart_period is not None:
-            cfg_data["periodRestartPeriod"] = restart_period
-        ws_api.send_request(self, "SET", "system/config", cfg_data)
+        self.set_system_settings(periodic_restart=enable, restart_period=restart_period)
 
     @override
     def rename_device(self, device_name: str) -> None:
         self.logger.debug(f"Renaming device {self.host} to {device_name}")
-        cfg_res = ws_api.send_request(self, "SUBSCRIBE", "system/config")
-        cfg_data = cfg_res.get("data", {})
-        cfg_data["devname"] = device_name
-        ws_api.send_request(self, "SET", "system/config", cfg_data)
+        self.set_system_settings(device_name=device_name)
 
     @override
     def set_system_settings(
@@ -1456,109 +1492,117 @@ class ESP500Device(NETIODevice):
         periodic_restart: bool | None = None,
         restart_period: int | None = None,
     ) -> None:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "system/config"
+
         self.logger.debug(f"Setting system settings on device {self.host}")
-        cfg_res = ws_api.send_request(self, "SUBSCRIBE", "system/config")
-        cfg_data = cfg_res.get("data", {})
+        if port is not None:
+            self.logger.warning(
+                f"The port of device {self.host} is not part of the system settings "
+                "on 5.0.0+ firmware and was not changed, "
+                "use set_server_settings to change it"
+            )
+        cfg_res = ws_api.send_request(self, ws_type, ws_topic)
+        cfg_data = self._require_config(cfg_res.get("data", {}), "system")
         if device_name is not None:
             cfg_data["devname"] = device_name
         if periodic_restart is not None:
             cfg_data["periodRestartEnable"] = periodic_restart
         if restart_period is not None:
             cfg_data["periodRestartPeriod"] = restart_period
-        response = ws_api.send_request(self, "SET", "system/config", cfg_data)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set system settings: {error_msg}")
+
+        ws_type = "SET"
+        _ = ws_api.send_request(self, ws_type, ws_topic, cfg_data)
 
     @override
     def locate(self) -> None:
+        ws_type = "SET"
+        ws_topic = "system/locate"
+        ws_data = {"locate": True}
+
         self.logger.debug(f"Locating device {self.host}")
-        ws_api.send_request(self, "SET", "system/locate", {"locate": True})
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def clear_system_log(self) -> None:
+        ws_type = "SET"
+        ws_topic = "log/clear"
+        ws_data: dict[str, Any] = {}
+
         self.logger.debug(f"Clearing system log on device {self.host}")
-        ws_api.send_request(self, "SET", "log/clear", {})
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def change_user_password(
         self, username: str, old_password: str, new_password: str
     ) -> None:
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"users/name/{username}/config"
+
         self.logger.debug(
             f"Changing password for user {username} on device {self.host}"
         )
-        user_cfg_res = ws_api.send_request(
-            self, "SUBSCRIBE", f"users/name/{username}/config"
-        )
-        if user_cfg_res.get("status") == "failed" or "error" in user_cfg_res:
-            error_msg = user_cfg_res.get("error", f"User {username} not found")
-            raise CommunicationError(
-                f"Failed to fetch user config for {username}: {error_msg}"
-            )
-
+        user_cfg_res = ws_api.send_request(self, ws_type, ws_topic)
         user_data = user_cfg_res["data"]
-        public_key = self.ws_helo_data.get("publicKey", "")
+        public_key = self._ws_helo_data.get("publicKey", "")
         password_hash = ws_api.generate_password_hash(
             username, new_password, public_key
         )
         user_data["passwordHash"] = password_hash
         user_data["password"] = ""
 
-        response = ws_api.send_request(
-            self, "SET", f"users/name/{username}/config", user_data
-        )
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(
-                f"Failed to change password for user {username}: {error_msg}"
-            )
+        ws_type = "SET"
+        ws_api.send_request(self, ws_type, ws_topic, user_data)
 
     @override
     def change_password(self, new_password: str) -> None:
+        self.logger.debug(f"Changing password of the current user on {self.host}")
         self.change_user_password(self.username, "", new_password)
 
     @override
     def get_cloud_state(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/cloud"
+
         self.logger.debug(f"Getting cloud state on device {self.host}")
-        response = ws_api.send_request(self, "SUBSCRIBE", "protocols/cloud")
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to get cloud state: {error_msg}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
         return response["data"]
 
     @override
     def set_cloud_state(self, state: bool) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/cloud"
+
         self.logger.debug(f"Setting cloud state to {state} on device {self.host}")
-        cloud_data = self.get_cloud_state()
-        cloud_data["enabled"] = state
-        response = ws_api.send_request(self, "SET", "protocols/cloud", cloud_data)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to set cloud state: {error_msg}")
+        ws_data = self.get_cloud_state()
+        ws_data["enabled"] = state
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        if state:
+            sleep(CLOUD_DEFAULT_CONNECTION_WAIT)
 
     @override
     def register_to_cloud(self, token: str) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/cloud/cmd"
+        ws_data = {"action": "register", "token": token, "server": ""}
+
         self.logger.debug(
             f"Registering to cloud with token {token} on device {self.host}"
         )
-        payload = {"action": "register", "token": token, "server": ""}
-        response = ws_api.send_request(self, "SET", "protocols/cloud/cmd", payload)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(f"Failed to register to cloud: {error_msg}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        sleep(CLOUD_ACTION_COMMUNICATION_DELAY)
 
     @override
     def set_on_premise(self, url: str) -> None:
+        ws_type = "SET"
+        ws_topic = "protocols/cloud/cmd"
+        ws_data = {"action": "setOnPremis", "token": "", "server": url}
+
         self.logger.debug(
             f"Setting on-premise cloud server to {url} on device {self.host}"
         )
-        payload = {"action": "setOnPremis", "token": "", "server": url}
-        response = ws_api.send_request(self, "SET", "protocols/cloud/cmd", payload)
-        if response.get("status") == "failed" or "error" in response:
-            error_msg = response.get("error", "Unknown error occurred on device")
-            raise CommunicationError(
-                f"Failed to set on-premise cloud server: {error_msg}"
-            )
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        sleep(CLOUD_ACTION_COMMUNICATION_DELAY)
 
     @override
     def netio_push_api_push_now(self) -> None:
@@ -1576,3 +1620,207 @@ class ESP500Device(NETIODevice):
             pass  # No need to clean up a non existant thread
         # TODO: Logout to be sure here even though destroying the connection should be sufficient
         self.ws = None
+
+    @override
+    def get_input_list(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "inputs/list"
+
+        self.logger.debug(f"Fetching input list from device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        return response
+
+    @override
+    def get_input_data(self, input_id: int) -> dict[str, Any]:
+        self.logger.debug(f"Fetching input {input_id} data from device {self.host}")
+        input_list = self.get_input_list()
+        if input_id > len(input_list["items"]):
+            raise InvalidSocketIndex(
+                f"The device doesn't support {input_id} inputs. The input range is <0;{len(input_list['items'])}>"
+            )
+        else:
+            return input_list["items"][input_id - 1]
+
+    @override
+    def get_system_datetime(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "system/datetime"
+
+        self.logger.debug(f"Fetching system date/time on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {})
+
+    # TODO: Timezone documentation
+    @override
+    def set_system_datetime(
+        self,
+        ntp_enabled: bool | None = None,
+        ntp_server: str | None = None,
+        timezone: str | None = None,
+        time: int | None = None,
+    ) -> None:
+        ws_type = "SET"
+        ws_topic = "system/datetime"
+
+        self.logger.debug(f"Setting system date/time on device {self.host}")
+        current = self._require_config(self.get_system_datetime(), "date/time")
+        ws_data: dict[str, Any] = {
+            "ntpEnabled": _value_or_current(ntp_enabled, current, "ntpEnabled"),
+            "ntpServer": _value_or_current(ntp_server, current, "ntpServer"),
+            "timezone": _value_or_current(timezone, current, "timezone"),
+            "time": _value_or_current(time, current, "time"),
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def system_reset(self) -> None:
+        ws_type = "SET"
+        ws_topic = "system/reset"
+        ws_data = {"reset": True}
+
+        self.logger.debug(f"Triggering system reset (reboot) on device {self.host}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        sleep(DEVICE_RESET_GRACE_PERIOD)
+
+    @override
+    def get_ethernet_settings(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "network/ethernet/config"
+
+        self.logger.debug(f"Fetching Ethernet settings on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {})
+
+    @override
+    def set_ethernet_settings(
+        self,
+        network_mode: str | None = None,
+        ip: str | None = None,
+        netmask: str | None = None,
+        gateway: str | None = None,
+        dns: str | None = None,
+    ) -> None:
+        ws_type = "SET"
+        ws_topic = "network/ethernet/config"
+
+        self.logger.debug(f"Setting Ethernet configuration on device {self.host}")
+        current = self._require_config(self.get_ethernet_settings(), "Ethernet")
+        if (
+            network_mode == "static"
+            and current["networkMode"] != "static"
+            and None in (ip, netmask, gateway)
+        ):
+            raise InvalidParameterValueError(
+                "ip, netmask and gateway are required when switching Ethernet "
+                "from DHCP to a static address"
+            )
+        ws_data: dict[str, Any] = {
+            "mac": current["mac"],
+            "networkMode": _value_or_current(network_mode, current, "networkMode"),
+            "ip": _value_or_current(ip, current, "ip"),
+            "netmask": _value_or_current(netmask, current, "netmask"),
+            "gateway": _value_or_current(gateway, current, "gateway"),
+            "dns": _value_or_current(dns, current, "dns"),
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def get_ethernet_status(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "network/ethernet/status"
+
+        self.logger.debug(f"Fetching Ethernet status on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {})
+
+    @override
+    def get_wifi_status(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "network/wifi/status"
+
+        self.logger.debug(f"Fetching Wi-Fi status on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {})
+
+    @override
+    def get_server_settings(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "network/servers/config"
+
+        self.logger.debug(f"Fetching web server settings on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {})
+
+    @override
+    def set_server_settings(
+        self,
+        http_enable: bool | None = None,
+        http_port: int | None = None,
+        https_enable: bool | None = None,
+        https_port: int | None = None,
+    ) -> None:
+        ws_type = "SET"
+        ws_topic = "network/servers/config"
+        # TODO: make sure to change the https settings if it's toggled to https and vice versa
+
+        self.logger.debug(f"Setting web server settings on device {self.host}")
+        current = self._require_config(self.get_server_settings(), "web server")
+        ws_data: dict[str, Any] = {
+            "httpEnable": _value_or_current(http_enable, current, "httpEnable"),
+            "httpPort": _value_or_current(http_port, current, "httpPort"),
+            "httpsEnable": _value_or_current(https_enable, current, "httpsEnable"),
+            "httpsPort": _value_or_current(https_port, current, "httpsPort"),
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def get_global_measurement(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "outputs/globalmeasure"
+
+        self.logger.debug(f"Fetching global measurements on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {}).get("measure", {})
+
+    @override
+    def get_outputs_list(self) -> list[dict[str, Any]]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "outputs/list"
+
+        self.logger.debug(f"Fetching outputs overview list on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {}).get("items", [])
+
+    @override
+    def get_firmware_updates_list(self) -> list[dict[str, Any]]:
+        ws_type = "SET"
+        ws_topic = "system/firmwarelist"
+        ws_data = {"getFirmwareList": True, "updateFw": ""}
+
+        self.logger.debug(f"Fetching available firmware updates on device {self.host}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+        ws_type = "SUBSCRIBE"
+        ws_topic = "fwupdate/list"
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {}).get("items", [])
+
+    @override
+    def get_system_lock(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "system/lock"
+        # TODO: Use for cloud communication verification timing
+
+        self.logger.debug(f"Fetching system lock state on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        return response.get("data", {})
+
+    @override
+    def get_system_notifications(self) -> list[dict[str, Any]]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "system/notifications"
+
+        self.logger.debug(f"Fetching system notifications on device {self.host}")
+        response = ws_api.send_request(self, ws_type, ws_topic)
+        data = response.get("data", [])
+        return data if isinstance(data, list) else []

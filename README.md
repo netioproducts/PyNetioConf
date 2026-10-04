@@ -7,10 +7,10 @@ or firmware version you're using.
 
 This module is currently under development and is not ready for production use. There might be breaking changes
 happening with relative frequency until the official release. The module is tested internally and should work
-correctly, but should still be considered alpha release.
+correctly, but should still be considered beta release.
 
 Currently, the module supports control and many configuration options on ESP devices running the 2.x.x through 5.x.x
-firmware versions and basic socket control operations on legacy NETIO 4 devices.  
+firmware versions.  
 NOTE: Even though this library uses an API that supports older firmware versions such as 3.2.6, they are no longer
 supported as firmware versions and any bugs on deprecated firmware versions won't be fixed.
 
@@ -18,35 +18,46 @@ supported as firmware versions and any bugs on deprecated firmware versions won'
 
 ### Git
 
-- Clone this repository and from the cloned folder install the module using pip:
+- Clone this repository and install the module from the cloned folder:
 
 ```bash
 git clone https://github.com/netioproducts/PyNetioConf.git
 cd PyNetioConf
 
-# If you can't or don't want to install site-wide packages create a virtual environment first:
+# with uv: creates a .venv in the project folder and installs the module into it in editable mode
+uv sync
+
+# or with pip: if you can't or don't want to install site-wide packages, create a virtual environment first
 python3 -m venv pnc_venv
 source pnc_venv/bin/activate
-
 pip3 install -e .
 ```
 
-- To update you can simply run `git pull` in the `PyNetioConf` directory, since the package was installed with the
-  `-e` flag, the changes will be reflected, but just to be sure you can rerun `pip3 install -e .`.
+- To update, run `git pull` in the `PyNetioConf` directory. Since the package is installed in editable mode, the
+  changes are picked up straight away, but to be sure you can rerun `uv sync` (or `pip3 install -e .`).
 
 ### Manual
 
 - Alternatively if you don't have git installed, you can download the code as a ZIP file from GitHub by clicking the
   green "Code" button.
 - After downloading the code, extract it to a directory and open that location in the terminal.
-- Once in the target directory run the `pip3 install -e .` command to install the package.
-    - If this produces an error or you wish to keep site-wide packages separate, create a virtual environment first
-      before installing with pip: `python3 -m venv pnc_venv && source pnc_venv/bin/activate` then run
-      `pip3 install -e .`
+- Once in the target directory run `uv sync`, or `pip3 install -e .` if you use pip.
+    - With pip, if this produces an error or you wish to keep site-wide packages separate, create a virtual
+      environment first: `python3 -m venv pnc_venv && source pnc_venv/bin/activate` then run `pip3 install -e .`
 
-### PyPi
+### PyPI
 
-_PyPI planned in future release_.
+```bash
+# with uv
+uv add PyNetioConf
+
+# or with pip
+pip install PyNetioConf
+```
+
+While only beta versions are published, this installs the latest beta. Once a stable version is released,
+installers will prefer it, and betas will need to be requested explicitly with
+`uv add --prerelease=allow PyNetioConf` or `pip install --pre PyNetioConf`.
 
 ## Usage
 
@@ -92,13 +103,13 @@ except PermissionError as e:
 _Note: Currently the firmware version and permission requirements might be missing and will be added over time. In
 the meantime please check method implementations for your specific version in `esp_xxx_device.py` files_.
 
-- To see sample usage of the package functions see: `src/PyNetioConf/examples/*`
+- To see sample usage of the package functions see: `examples/*`
 
 ### Using pre-made scripts
 
 - This repository contains some common usage scenarios as pre-made example scripts, if you are only looking for
   specific use-case and don't intend to develop using this library this section goes over the usage of those scripts.
-- All the pre-made scripts are located in `./src/PyNetioConf/examples/` and to use them you will need to have
+- All the pre-made scripts are located in `./examples/` and to use them you will need to have
   installed the library as described in the Installation section of the readme.
 - Once you have the library installed you can choose whichever script you want to use and open the file in any text
   editor.
@@ -110,8 +121,8 @@ the meantime please check method implementations for your specific version in `e
       USERNAME = "admin"
       PASSWORD = "admin"
       FIRMWARE_PATH = "/home/user/Downloads/release503.package"
-    - Then I run the file with python from the `PyNetioConf` directory: `python3 
-      src/PyNetioConf/examples/update_firmware.py`
+    - Then I run the file with python from the `PyNetioConf` directory: `python3 examples/update_firmware.py`
+      (with uv, run it as `uv run examples/update_firmware.py`)
     - If I did all the steps correctly I should see an output simillar to the following:
     - ```
       TODO

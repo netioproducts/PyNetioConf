@@ -1,6 +1,6 @@
 [project]
 name = "PyNetioConf"
-version = "0.2.0a2"
+version = "0.3.0b1.dev1"
 requires-python = ">= 3.10"
 authors = [
     { name = "NETIO products a.s.", email = "support@netio.eu" }
@@ -9,9 +9,10 @@ maintainers = [
     { name = "Jakub Šperl", email = "jsperl@netio.eu" }
 ]
 
-description = "Universal module to control and configure all NETIO device"
+description = "Universal module to control and configure all NETIO devices"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["NETIO"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -20,26 +21,30 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Natural Language :: English",
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
 ]
 
 dependencies = [
     "websocket-client",
     "requests",
     "urllib3",
-    "typing-extensions; python_version < '3.12'"
+    "typing-extensions>=4.4.0; python_version < '3.12'"
 ]
 
 [project.urls]
 Homepage = "https://netio-products.com/"
 Repository = "https://github.com/netioproducts/PyNetioConf"
 Issues = "https://github.com/netioproducts/PyNetioConf/issues"
-Chanegelog = "https://github.com/netioproducts/PyNetioConf/blob/main/CHANGELOG.txt"
+Changelog = "https://github.com/netioproducts/PyNetioConf/blob/main/CHANGELOG.md"
 
 [build-system]
-requires = ["setuptools >= 70.0"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.12.22,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "PyNetioConf"
+# uv_build does not read .gitignore; keep local-only folders out of builds made outside CI.
+source-exclude = [".venv", "devhelpers"]

@@ -24,6 +24,7 @@ from ..exceptions import (
     ElementNotFound,
     FeatureNotSupported,
     InvalidParameterValueError,
+    InvalidSocketIndex,
     ProtocolNotEnabled,
 )
 from ..netio_device import NETIODevice
@@ -197,8 +198,10 @@ class ESPDevice(NETIODevice):
         self.logger.debug(f"Resetting output {output_id} on device {self.host}.")
 
     def set_output_schedule(
-        self, output_id: int, schedule_id: int, enabled: bool = True
+        self, output_id: int, schedule_id: int, enabled: bool | None = None
     ) -> None:
+        if enabled is None:
+            enabled = True
         if "can_control_outputs" not in self.user_permissions:
             raise PermissionError(
                 "You don't have permission to control outputs on this device."
@@ -215,7 +218,7 @@ class ESPDevice(NETIODevice):
         )
 
     def get_output_schedule(self, output_id: int) -> dict[str, Any]:
-        output_data = self.get_output_schedule(output_id)
+        output_data = self.get_output_data(output_id)
         schedule = output_data["schedule"]
         return schedule
 
@@ -234,7 +237,7 @@ class ESPDevice(NETIODevice):
         )
 
     def set_output_schedule_by_name(
-        self, output_id: int, schedule_name: str, enabled: bool = True
+        self, output_id: int, schedule_name: str, enabled: bool | None = None
     ) -> None:
         schedule_id = self.get_schedule_id(schedule_name)
         self.set_output_schedule(output_id, schedule_id, enabled)
@@ -288,8 +291,21 @@ class ESPDevice(NETIODevice):
             self.logger.warning(f"Unable to connect to {ssid} on device {self.host}")
 
     def set_wifi_static_address(
-        self, address: str, net_mask: str, gateway: str, dns_server: str, hostname: str
+        self,
+        address: str | None = None,
+        net_mask: str | None = None,
+        gateway: str | None = None,
+        dns_server: str | None = None,
+        hostname: str | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_wifi_static_address",
+            address=address,
+            net_mask=net_mask,
+            gateway=gateway,
+            dns_server=dns_server,
+            hostname=hostname,
+        )
         if self.supported_features["wifi"] == "no":
             raise FeatureNotSupported("Wi-Fi is not supported on this device.")
         mac_address = str(self.get_wifi_settings()["mac"])
@@ -468,7 +484,7 @@ class ESPDevice(NETIODevice):
         esp_api.send_request(self, "setSystemConfig", request_data)
 
     def set_periodic_restart(
-        self, enable: bool, restart_period: int | None = None
+        self, enable: bool | None = None, restart_period: int | None = None
     ) -> None:
         self.set_system_settings(periodic_restart=enable, restart_period=restart_period)
 
@@ -630,8 +646,17 @@ class ESPDevice(NETIODevice):
     # region URLAPI
 
     def set_urlapi_state(
-        self, protocol_enabled: bool, write_enable: bool, write_password: str
+        self,
+        protocol_enabled: bool | None = None,
+        write_enable: bool | None = None,
+        write_password: str | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_urlapi_state",
+            protocol_enabled=protocol_enabled,
+            write_enable=write_enable,
+            write_password=write_password,
+        )
         json_data = {
             "enable": protocol_enabled,
             "write": {"enable": write_enable, "password": write_password},
@@ -657,12 +682,17 @@ class ESPDevice(NETIODevice):
 
     def set_modbus_state(
         self,
-        protocol_enabled: bool,
-        port: int = 502,
-        ip_filter_enabled: bool = False,
-        ip_from: str = "",
-        ip_to: str = "",
+        protocol_enabled: bool | None = None,
+        port: int | None = None,
+        ip_filter_enabled: bool | None = None,
+        ip_from: str | None = None,
+        ip_to: str | None = None,
     ) -> None:
+        self._require_arguments("set_modbus_state", protocol_enabled=protocol_enabled)
+        port = 502 if port is None else port
+        ip_filter_enabled = False if ip_filter_enabled is None else ip_filter_enabled
+        ip_from = "" if ip_from is None else ip_from
+        ip_to = "" if ip_to is None else ip_to
         modbus_data = self.get_modbus_state()
         json_data = {"enable": protocol_enabled, "port": port, "id": 107}
         if ip_filter_enabled:
@@ -697,12 +727,13 @@ class ESPDevice(NETIODevice):
 
     def set_json_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         read_enable: bool | None = None,
         write_enable: bool | None = None,
         read_auth: tuple[str, str] | None = None,
         write_auth: tuple[str, str] | None = None,
     ) -> None:
+        self._require_arguments("set_json_api_state", protocol_enabled=protocol_enabled)
         # TODO: Make the parameters optional, so only a specific setting can be changed.
         current_config = self.get_json_api_state()
 
@@ -783,13 +814,16 @@ class ESPDevice(NETIODevice):
 
     def set_telnet_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         port: int | None = None,
         read_enabled: bool | None = None,
         read_auth: tuple[str, str] | None = None,
         write_enabled: bool | None = None,
         write_auth: tuple[str, str] | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_telnet_api_state", protocol_enabled=protocol_enabled
+        )
         action = "setProtocol"
         current_state = self.get_telnet_api_state()
         request_data = {
@@ -848,12 +882,15 @@ class ESPDevice(NETIODevice):
 
     def set_netio_push_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         url: str | None = None,
         push_protocol: str | None = None,
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_netio_push_api_state", protocol_enabled=protocol_enabled
+        )
         action = "setProtocol"
         current_state = self.get_netio_push_api_state()
         request_data = {
@@ -990,11 +1027,14 @@ class ESPDevice(NETIODevice):
 
     def set_snmp_v1_2_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         location: str | None = None,
         community_read: str | None = None,
         community_write: str | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_snmp_v1_2_api_state", protocol_enabled=protocol_enabled
+        )
         self.logger.debug(f"Setting SNMP v1,2c API state on device {self.host}")
         if not protocol_enabled:
             self.logger.debug(
@@ -1006,7 +1046,7 @@ class ESPDevice(NETIODevice):
 
     def set_snmp_v3_api_state(
         self,
-        protocol_enabled: bool,
+        protocol_enabled: bool | None = None,
         location: str | None = None,
         security_name: str | None = None,
         security_level: str | None = None,
@@ -1015,6 +1055,9 @@ class ESPDevice(NETIODevice):
         priv_protocol: str | None = None,
         priv_key: str | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_snmp_v3_api_state", protocol_enabled=protocol_enabled
+        )
         self.logger.debug(f"Setting SNMP v3 API state on device {self.host}")
         if not protocol_enabled:
             self.logger.debug(
@@ -1038,12 +1081,20 @@ class ESPDevice(NETIODevice):
 
     def set_xml_api_state(
         self,
-        protocol_enabled: bool,
-        read_enable: bool,
-        write_enable: bool,
-        read_auth: tuple[str, str],
-        write_auth: tuple[str, str],
+        protocol_enabled: bool | None = None,
+        read_enable: bool | None = None,
+        write_enable: bool | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
+        self._require_arguments(
+            "set_xml_api_state",
+            protocol_enabled=protocol_enabled,
+            read_enable=read_enable,
+            write_enable=write_enable,
+            read_auth=read_auth,
+            write_auth=write_auth,
+        )
         # TODO: Make the parameters optional, so only a specific setting can be changed.
         request_data = {
             "enable": protocol_enabled,
@@ -1208,6 +1259,11 @@ class ESPDevice(NETIODevice):
                 active_schedules.append(schedule)
         return active_schedules
 
+    def create_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
+        raise NotImplementedError(
+            "create_schedule is only available for devices 5.x.x and up, please update your device."
+        )
+
     def delete_schedule(self, schedule_id: int) -> None:
         action = "deleteSchedule"
         self.logger.debug(f"Deleting schedule {schedule_id} from device {self.host}")
@@ -1279,6 +1335,15 @@ class ESPDevice(NETIODevice):
                 f" the device supports <1;{self.output_count}>."
             )
 
+    def _require_arguments(self, method_name: str, **arguments: Any) -> None:
+        # Pre-5.0.0 can't keep these values from the device, so they stay required.
+        missing = [name for name, value in arguments.items() if value is None]
+        if missing:
+            raise InvalidParameterValueError(
+                f"{method_name} requires {', '.join(missing)} "
+                "on firmware older than 5.0.0"
+            )
+
     def _cleanup(self) -> None:
         try:
             if self._ka_thread:
@@ -1297,7 +1362,9 @@ class ESPDevice(NETIODevice):
             "MQTT with certificates is only supported on firmware 5.0.0 and newer."
         )
 
-    def set_mqttflex_state(self, state: bool, config: dict | None = None) -> None:
+    def set_mqttflex_state(
+        self, state: bool | None = None, config: dict | None = None
+    ) -> None:
         raise FeatureNotSupported(
             "MQTT with certificates is only supported on firmware 5.0.0 and newer."
         )
@@ -1332,3 +1399,118 @@ class ESPDevice(NETIODevice):
         response = esp_api.send_request(self, "getVersion").json()["data"]["revision"]
         self.logger.debug(f"Received device version information: {response}")
         return response
+
+    @override
+    def get_input_list(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "Input commands are only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_input_data(self, input_id: int) -> dict[str, Any]:
+        raise NotImplementedError(
+            "Input commands are only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_system_datetime(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_system_datetime is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def set_system_datetime(
+        self,
+        ntp_enabled: bool | None = None,
+        ntp_server: str | None = None,
+        timezone: str | None = None,
+        time: int | None = None,
+    ) -> None:
+        raise NotImplementedError(
+            "set_system_datetime is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def system_reset(self) -> None:
+        raise NotImplementedError(
+            "system_reset is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_ethernet_settings(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_ethernet_settings is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def set_ethernet_settings(
+        self,
+        network_mode: str | None = None,
+        ip: str | None = None,
+        netmask: str | None = None,
+        gateway: str | None = None,
+        dns: str | None = None,
+    ) -> None:
+        raise NotImplementedError(
+            "set_ethernet_settings is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_ethernet_status(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_ethernet_status is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_wifi_status(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_wifi_status is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_server_settings(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_server_settings is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def set_server_settings(
+        self,
+        http_enable: bool | None = None,
+        http_port: int | None = None,
+        https_enable: bool | None = None,
+        https_port: int | None = None,
+    ) -> None:
+        raise NotImplementedError(
+            "set_server_settings is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_global_measurement(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_global_measurement is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_outputs_list(self) -> list[dict[str, Any]]:
+        raise NotImplementedError(
+            "get_outputs_list is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_firmware_updates_list(self) -> list[dict[str, Any]]:
+        raise NotImplementedError(
+            "get_firmware_updates_list is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_system_lock(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_system_lock is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def get_system_notifications(self) -> list[dict[str, Any]]:
+        raise NotImplementedError(
+            "get_system_notifications is only available for devices 5.x.x and up, please update your device."
+        )

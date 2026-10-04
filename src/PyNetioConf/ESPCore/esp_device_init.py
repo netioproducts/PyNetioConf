@@ -152,8 +152,8 @@ def _try_connect_websocket(
                         "Couldn't establish ws connection in time, waiting to reconnect."
                     )
                     sleep(10 - elapsed_time)
-        except:
-            logger.debug(f"Connection to {host} faled on {attempt + 1}/{try_count}")
+        except Exception as e:
+            logger.debug(f"Connection to {host} failed on {attempt + 1}/{try_count}")
             sleep(1)
             continue
 
@@ -286,6 +286,7 @@ def initialize_esp(
                 ws_connection=ws,
                 ws_req_id=ws_req_id,
                 is_ws_auth=True if ws is not None else False,
+                ws_helo_data=hello_response,
             )
             return netio_device
         elif int(minor) == 1:
@@ -303,6 +304,7 @@ def initialize_esp(
                 ws_connection=ws,
                 ws_req_id=ws_req_id,
                 is_ws_auth=True if ws is not None else False,
+                ws_helo_data=hello_response,
             )
             return netio_device
         else:

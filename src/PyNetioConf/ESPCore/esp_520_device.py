@@ -10,7 +10,8 @@ import ssl
 import sys
 from collections import deque
 from io import BytesIO
-from time import sleep
+from pathlib import Path
+from time import sleep, time
 
 from ..constants import (
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
@@ -133,9 +134,14 @@ class ESP520Device(ESP500Device):
     def upload_mqtt_client_key(self, key: str) -> None:
         import base64
 
-        upload_id = ws_api.send_request(
-            self, "SET", "protocols/mqtt/clientkeyupload", {}
-        )["data"]["uploadId"]
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/clientkeyupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadId"
+        ]
         original_bytes = key.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(self, base64_string, 0, len(key), len(key), upload_id)
@@ -144,9 +150,14 @@ class ESP520Device(ESP500Device):
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
         import base64
 
-        upload_id = ws_api.send_request(self, "SET", "protocols/mqtt/cacertupload", {})[
-            "data"
-        ]["uploadId"]
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/cacertupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadId"
+        ]
         original_bytes = ca.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(self, base64_string, 0, len(ca), len(ca), upload_id)
@@ -155,9 +166,14 @@ class ESP520Device(ESP500Device):
     def upload_mqtt_client_certificate(self, cert: str) -> None:
         import base64
 
-        upload_id = ws_api.send_request(
-            self, "SET", "protocols/mqtt/clientcertupload", {}
-        )["data"]["uploadId"]
+        ws_type = "SET"
+        ws_topic = "protocols/mqtt/clientcertupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadId"
+        ]
         original_bytes = cert.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(
@@ -253,4 +269,80 @@ class ESP520Device(ESP500Device):
 
     @override
     def import_config(self, file, **kwargs):
-        pass
+        ws_type = "SET"
+        ws_topic = "system/cfgimport"
+        ws_data = {}
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
+            "uploadId"
+        ]
+
+        if isinstance(file, io.BufferedIOBase):
+            self.logger.debug(f"Importing configuration to host {self.host}")
+            ws_api.upload_file(self, file, upload_id)
+        elif isinstance(file, str):
+            file_path = Path(file)
+            if file_path.exists():
+                with open(file, "rb") as file:
+                    ws_api.upload_file(self, file, upload_id)
+        else:
+            self.logger.debug("Unsupported file format.")
+
+    @override
+    def ping(self) -> bool:
+        ws_type = "PING"
+        start_time = time()
+        ws_api.send_request(self, ws_type)
+        end_time = time()
+        self.logger.debug(
+            f"Pinging device {self.host} successful. Response time: {end_time - start_time}"
+        )
+        return True
+
+    @override
+    def export_config(self, save_file: str | None = None) -> dict[str, Any]:
+        ws_type = "SET"
+        ws_export_topics_list = [
+            "export/config/inputs",
+            "export/config/network",
+            "export/config/outputs",
+            "export/config/PAB",
+            "export/config/protocols",
+            "export/config/rules",
+            "export/config/schedules",
+            "export/config/system",
+            "export/config/users",
+            "export/config/wdtpingers",
+            "export/config/mqtt",
+            "export/config/nbus",
+        ]
+        ws_data: dict[str, Any] = {}
+
+        config_export: dict[str, Any] = dict()
+
+        for config_group in ws_export_topics_list:
+            self.logger.debug(
+                f"Exporting configuration for {config_group.split('/')[-1]} from device {self.host}"
+            )
+            group_data = ws_api.send_request(self, ws_type, config_group, ws_data).get(
+                "data", {}
+            )
+            config_export |= {config_group.split("/")[-1]: group_data}
+        if save_file is not None:
+            file_path = Path(save_file)
+            if file_path.exists():
+                self.logger.warning("Export config file exists, overriding.")
+                # TODO: Make override a method parameter
+
+            with open(save_file, "w+") as file:
+                conf_string = json.dumps(config_export, ensure_ascii=False, indent=4)
+                file.write(conf_string)
+
+        return config_export
+
+    @override
+    def _keep_alive(self) -> None:
+        self.logger.debug(f"Sending keep-alive to device {self.host}")
+        self._ka_thread = threading.Timer(120, self._keep_alive)
+        self._ka_thread.daemon = True
+        self._ka_thread.start()
+        self.ping()
