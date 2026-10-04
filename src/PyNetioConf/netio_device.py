@@ -4,53 +4,67 @@ extended by the device-specific classes.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple
+from collections import deque
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple
 from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
 
-from . import NetioManager
+# from .NetioManager import NetioManager
 
 
 class NETIODevice(ABC):
     """
-    A base class for ESPDevices based on the 3.x.x firmware.
+    A base class for Netio devices using the ESP platform.
+
+    When making changes to class init or structure the following needs to be updated in accordance:
+        2.x.x-4.x.x share init class due to API similarities
+        5.beta has own init (deprecated in PyNetioConf 0.2+)
+        5.0.0 has it's own init
+        5.2.0 has it's own init
     """
 
     def __init__(
-            self,
-            host: str,
-            username: str,
-            password: str,
-            sn_number: str,
-            hostname: str,
-            keep_alive: bool = True,
-            netio_manager: NetioManager = None,
-            use_https: bool = False,
-            **kwargs
-    ):
+        self,
+        host: str,
+        username: str,
+        password: str,
+        sn_number: str,
+        hostname: str,
+        keep_alive: bool = True,
+        netio_manager: Optional["NetioManager"] = None,  # type: ignore  # noqa: F821
+        use_https: bool = False,
+        **kwargs: Any,
+    ) -> None:
         self.host = host
         self.username = username
         self.password = password
         self.sn_number = sn_number
         self.hostname = hostname
         self.session_id = ""
-        self.supported_features = dict()
+        self.supported_features: dict[str, Any] = dict()
         self.output_count = 0
-        self.user_permissions = list()
+        self.user_permissions: list[str] = list()
         self._keep_alive_flag = keep_alive
         self._ka_thread = None
-        self.ws: Optional[WebSocket] = None
+        self.ws: WebSocket | None = None
         self.ws_req_id = 0
         self.use_https = use_https
+        self._request_queue: deque[dict[str, Any]] = deque()
+        self._pong_queue: deque[dict[str, Any]] = deque()
+        if use_https:
+            from urllib3 import disable_warnings
+            from urllib3.exceptions import InsecureRequestWarning
+
+            disable_warnings(category=InsecureRequestWarning)
 
         # Keep an instace of NetioManager for updating device classes during
         # firmware updates.
-        self.netio_manager = netio_manager
+        self.netio_manager = None
 
     # region Session
     @abstractmethod
-    def login(self, username: str, password: str, logout=False) -> str:
+    def login(self, username: str, password: str, logout: bool = False) -> str:
         """
         Login to the device, generating a session ID to be used for the requests across the session.
 
@@ -103,7 +117,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_version_detailed(self) -> Dict:
+    def get_version_detailed(self) -> str:
         """
         Get the detailed version information of the device.
 
@@ -114,7 +128,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_features(self) -> Dict:
+    def get_features(self) -> dict[str, Any]:
         """
         Get the features of the device.
 
@@ -128,6 +142,21 @@ class NETIODevice(ABC):
 
     # region Sockets
     # region Socket Control
+    @abstractmethod
+    def get_output_state(self, output_id: int) -> bool:
+        """
+        Get the output state of the device.
+        Parameters
+        ----------
+        output_id : int
+            The id of the output.
+
+        Returns
+        -------
+            A boolean indicating if the output is on.
+        """
+        pass
+
     @abstractmethod
     def set_output(self, output_id: int, state: bool) -> None:
         """
@@ -188,7 +217,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_output_schedule(self, output_id: int, schedule_id: int, enabled: bool = True) -> None:
+    def set_output_schedule(
+        self, output_id: int, schedule_id: int, enabled: bool | None = None
+    ) -> None:
         """
         Activate or deactivate a specific schedule on a given output provided the schedule's ID.
 
@@ -198,8 +229,8 @@ class NETIODevice(ABC):
             The number of the output.
         schedule_id: int
             The ID of the schedule.
-        enabled: bool
-            Whether the schedule should be enabled.
+        enabled: bool | None
+            Whether the schedule should be enabled. If None, keeps the current state on the device.
 
         Returns
         -------
@@ -208,7 +239,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_output_schedule(self, output_id: int) -> Dict:
+    def get_output_schedule(self, output_id: int) -> dict[str, Any]:
         """
         Gets the schedule id and its state based on the output ID.
 
@@ -257,7 +288,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_output_schedule_by_name(self, output_id: int, schedule_name: str, enabled: bool = True) -> None:
+    def set_output_schedule_by_name(
+        self, output_id: int, schedule_name: str, enabled: bool | None = None
+    ) -> None:
         """
         Activate or deactivate a specific schedule on a given output provided the schedule's name. If the schedule
         with such name isn't available raises ElementNotFound.
@@ -268,8 +301,8 @@ class NETIODevice(ABC):
             The number of the output.
         schedule_name : str
             The name of the schedule.
-        enabled : bool
-            Whether the schedule should be enabled.
+        enabled : bool | None
+            Whether the schedule should be enabled. If None, keeps the current state on the device.
 
         Returns
         -------
@@ -281,7 +314,7 @@ class NETIODevice(ABC):
     # region Socket Information
 
     @abstractmethod
-    def get_output_data(self, output_id: int) -> Dict:
+    def get_output_data(self, output_id: int) -> dict[str, Any]:
         """
         Produces all relevant information about the output given its ID.
 
@@ -297,7 +330,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_outputs_data(self) -> List[Dict]:
+    def get_outputs_data(self) -> list[dict[str, Any]]:
         """
         Produces a list of all the outputs on the device and relevant information about it. The information might
         differ between device types.
@@ -310,7 +343,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_output_states(self) -> List[Tuple[int, bool]]:
+    def get_output_states(self) -> list[tuple[int, bool]]:
         """
         Generates a list of the socket states currently on the device.
 
@@ -328,7 +361,7 @@ class NETIODevice(ABC):
 
     # region Network
     @abstractmethod
-    def get_wifi_settings(self) -> Dict:
+    def get_wifi_settings(self) -> dict[str, Any]:
         """
         Produces all relevant information about the Wi-Fi settings on the device.
 
@@ -358,23 +391,32 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def set_wifi_static_address(
-            self, address: str, net_mask: str, gateway: str, dns_server: str, hostname: str
+        self,
+        address: str | None = None,
+        net_mask: str | None = None,
+        gateway: str | None = None,
+        dns_server: str | None = None,
+        hostname: str | None = None,
     ) -> None:
         """
-        Sets the device static address on the currently connected Wi-Fi network. All the arguments are required.
+        Sets the device static address on the currently connected Wi-Fi network. Any argument left as None keeps
+        the value currently configured on the device. When the device is currently using DHCP, address, net_mask
+        and gateway are required.
 
         Parameters
         ----------
-        address: str
+        address: str | None
             The IPv4 address the device should use.
-        net_mask: str
+        net_mask: str | None
             The network mask for the subnet.
-        gateway: str
+        gateway: str | None
             Gateway IPv4 for the device.
-        dns_server: str
+        dns_server: str | None
             The DNS server the device will use for domain resolution.
-        hostname: str
+        hostname: str | None
             The hostname of the device. The device will appear on the network under this name.
+            Note: on 5.0.0+ firmware the hostname is taken from the device name, so this argument is ignored and a
+            warning is logged. Use rename_device to change it.
 
         Returns
         -------
@@ -385,7 +427,7 @@ class NETIODevice(ABC):
     # endregion
 
     @abstractmethod
-    def import_config(self, file, **kwargs) -> None:
+    def import_config(self, file, **kwargs: Any) -> None:
         """
         Import configuration to the device from a JSON file.
         Parameters
@@ -399,7 +441,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def export_config(self, save_file: str = None) -> Dict:
+    def export_config(self, save_file: str | None = None) -> dict[str, Any]:
         """
         Export the device's configuration to a JSON file.
 
@@ -447,16 +489,24 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_system_settings(self, device_name: str = None, port: int = None, periodic_restart: bool = None,
-                            restart_period: int = None) -> None:
+    def set_system_settings(
+        self,
+        device_name: str | None = None,
+        port: int | None = None,
+        periodic_restart: bool | None = None,
+        restart_period: int | None = None,
+    ) -> None:
         """
-        Sets the system settings on device given the provided parameters.
+        Sets the system settings on device given the provided parameters. Any argument left as None keeps the
+        value currently configured on the device.
         Parameters
         ----------
         device_name : str
             The desired name of the device.
         port : int
             The port on which the device communication will run.
+            Note: on 5.0.0+ firmware the port is set with set_server_settings, so this argument is ignored and a
+            warning is logged.
         periodic_restart : bool
             Toggle for the periodic restart feature.
         restart_period : int
@@ -470,7 +520,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_system_info(self) -> Dict:
+    def get_system_info(self) -> dict[str, Any]:
         """
         Gets the system info on the device.
 
@@ -502,13 +552,27 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_periodic_restart(self, enable: bool, restart_period: int = None) -> None:
+    def reset_output_consumption_counter(self, output_id: int) -> None:
+        """
+        Resets power consumption counters for a specific output by its ID.
+
+        Parameters
+        ----------
+        output_id : int
+            The number of the output to reset counters for.
+        """
+        pass
+
+    @abstractmethod
+    def set_periodic_restart(
+        self, enable: bool | None = None, restart_period: int | None = None
+    ) -> None:
         """
         Sets the periodic restart feature toggle and optionally changes the restart period.
         Parameters
         ----------
         enable : bool
-            Should the restart feature be enabled.
+            Should the restart feature be enabled. If None, keeps the value currently set on the device.
         restart_period : int
             Time in minutes for the periodic restart feature.
 
@@ -529,7 +593,7 @@ class NETIODevice(ABC):
 
     # region User Management
     @abstractmethod
-    def get_current_user(self) -> Dict:
+    def get_current_user(self) -> dict[str, Any]:
         """
         Gets the logged-in user that corresponds to the session id used in this request.
 
@@ -540,7 +604,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_users(self) -> Dict:
+    def get_users(self) -> dict[str, Any]:
         """
         Gets the users and their details.
         Returns
@@ -550,7 +614,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_user_privileges(self, username: str) -> List[str]:
+    def get_user_privileges(self, username: str) -> list[str]:
         """
         Gets a list of privileges for the specified user.
 
@@ -579,7 +643,7 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def change_user_password(
-            self, username: str, old_password: str, new_password: str
+        self, username: str, old_password: str, new_password: str
     ) -> None:
         """
         Change the administrator password. Requires you to be logged in as administrator.
@@ -596,7 +660,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def create_user(self, username: str, password: str, privileges: List[str] = None) -> None:
+    def create_user(
+        self, username: str, password: str, privileges: list[str] = None
+    ) -> None:
         """
         Creates a new user on the device with the given parameters.
 
@@ -634,7 +700,7 @@ class NETIODevice(ABC):
     # region Protocols
 
     @abstractmethod
-    def get_active_protocols(self) -> List[int]:
+    def get_active_protocols(self) -> list[int]:
         """
         Produces a list of the currently active protocols.
 
@@ -645,7 +711,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_supported_protocols(self) -> List[int]:
+    def get_supported_protocols(self) -> list[int]:
         """
         Produces a list of all the protocols supported by the current device, also contains relevant information about
         those protocols.
@@ -676,7 +742,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_cloud_state(self) -> Dict:
+    def get_cloud_state(self) -> dict[str, Any]:
         """
         Get the cloud state of the device.
 
@@ -723,19 +789,23 @@ class NETIODevice(ABC):
     # region URLAPI
     @abstractmethod
     def set_urlapi_state(
-            self, protocol_enabled: bool, write_enable: bool, write_auth: Tuple[str, str]
+        self,
+        protocol_enabled: bool | None = None,
+        write_enable: bool | None = None,
+        write_password: str | None = None,
     ) -> None:
         """
-        Configures the modbus M2M protocol with the provided parameters.
+        Configures the URL API protocol with the provided parameters. Any argument left as None keeps the value
+        currently configured on the device.
 
         Parameters
         ----------
-        protocol_enabled: bool
+        protocol_enabled: bool | None
             Toggle of the enabled protocol. Not that if any other protocols are enabled, this one is to take precedence.
-        write_enable: bool
+        write_enable: bool | None
             Enable Write portion of the API. URLAPI doesn't have a read-only part such as JSON or XML.
-        write_auth: tuple[str, str]
-            A tuple of the authentication pair for the Write portion of the API.
+        write_password: str | None
+            The password for the Write portion of the API.
         """
         pass
 
@@ -743,7 +813,7 @@ class NETIODevice(ABC):
 
     # region Modbus
     @abstractmethod
-    def get_modbus_state(self) -> Dict:
+    def get_modbus_state(self) -> dict[str, Any]:
         """
         Get the Modbus M2M API state of the device.
 
@@ -755,15 +825,16 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def set_modbus_state(
-            self,
-            protocol_enabled: bool,
-            port: int,
-            ip_filter_enabled: bool,
-            ip_from: str,
-            ip_to: str,
+        self,
+        protocol_enabled: bool | None = None,
+        port: int | None = None,
+        ip_filter_enabled: bool | None = None,
+        ip_from: str | None = None,
+        ip_to: str | None = None,
     ) -> None:
         """
-        Configures the modbus M2M protocol with the provided parameters.
+        Configures the modbus M2M protocol with the provided parameters. Any argument left as None keeps the value
+        currently configured on the device.
 
         Parameters
         ----------
@@ -792,7 +863,7 @@ class NETIODevice(ABC):
         Parameters
         ----------
         key: str
-            The private key to upload to the device. 
+            The private key to upload to the device.
         """
         pass
 
@@ -821,7 +892,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_mqttflex_state(self) -> Dict:
+    def get_mqttflex_state(self) -> dict[str, Any]:
         """
         Gets the state of the MQTT Flex protocol currently set on the device.
 
@@ -832,7 +903,9 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_mqttflex_state(self, state: bool, config: dict = None) -> None:
+    def set_mqttflex_state(
+        self, state: bool | None = None, config: dict[str, Any] | None = None
+    ) -> None:
         """
         Sets the state and if provided configuration of the MQTT Flex protocol.
 
@@ -842,8 +915,9 @@ class NETIODevice(ABC):
 
         Parameters
         ----------
-        state: bool
-            A boolean to determine if the protocol should be enabled or disabled.
+        state: bool | None
+            A boolean to determine if the protocol should be enabled or disabled. If None, keeps the state that is
+            present on device.
         config: dict
             A dict object containing the desired MQTT configuration to upload to the device.
         """
@@ -853,7 +927,7 @@ class NETIODevice(ABC):
 
     # region JSON
     @abstractmethod
-    def get_json_api_state(self) -> Dict:
+    def get_json_api_state(self) -> dict[str, Any]:
         """
         Get the JSON M2M API state of the device.
 
@@ -865,16 +939,16 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def set_json_api_state(
-            self,
-            protocol_enabled: bool,
-            read_enable: bool,
-            write_enable: bool,
-            read_auth: Tuple[str, str],
-            write_auth: Tuple[str, str],
+        self,
+        protocol_enabled: bool | None = None,
+        read_enable: bool | None = None,
+        write_enable: bool | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
         """
-        Function for configuring the JSON M2M on the device. All parameters are required and will be set to the ones
-        provided.
+        Function for configuring the JSON M2M on the device. Any argument left as None keeps the value currently
+        configured on the device.
 
         Parameters
         ----------
@@ -898,7 +972,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_json(self, json_auth: Tuple[str, str]) -> Dict:
+    def get_json(self, json_auth: tuple[str, str]) -> dict[str, Any]:
         """
         Gets the JSON information from the device. This contains full information about the device.
 
@@ -916,7 +990,7 @@ class NETIODevice(ABC):
     # endregion
 
     @abstractmethod
-    def get_netio_push_api_state(self) -> Dict:
+    def get_netio_push_api_state(self) -> dict[str, Any]:
         """
         Gets the state and settings of the M2M Netio Push protocol currently set on the device.
 
@@ -927,19 +1001,26 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_netio_push_api_state(self, protocol_enabled: bool, url: str = None, push_protocol: str = None,
-                                 delta: int = None, period: int = None) -> None:
+    def set_netio_push_api_state(
+        self,
+        protocol_enabled: bool | None = None,
+        url: str | None = None,
+        push_protocol: str | None = None,
+        delta: int | None = None,
+        period: int | None = None,
+    ) -> None:
         """
         Sets the state and settings of the M2M Netio Push protocol currently set on the device.
 
         Parameters
         ----------
         protocol_enabled : bool
-            Whether the protocol should be enabled or disabled.
+            Whether the protocol should be enabled or disabled. If None, keeps the setting already set on the device.
         url : str
             On what URL should the protocol push its messages. If None, keeps the setting already set on the device.
         push_protocol : str
-            Which format should the push protocol use. Can be either 'json' or 'xml'. If None, keeps the setting already set on the device.
+            Which format should the push protocol use. Can be either 'json' or 'xml'. If None, the format is not sent
+            and the device keeps its current one.
         delta : int
             The current delta for auto push. If None, keeps the setting already set on the device.
         period : int
@@ -952,7 +1033,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_snmp_api_state(self) -> Dict:
+    def get_snmp_api_state(self) -> dict[str, Any]:
         """
         Gets the state and settings of the M2M SNMP protocol currently set on the device.
 
@@ -962,16 +1043,31 @@ class NETIODevice(ABC):
         """
 
     @abstractmethod
-    def _set_snmp_api_state(self, protocol_enabled: bool, version: str, location: str = None,
-                            community_read: str = None, community_write: str = None, security_name: str = None,
-                            security_level: str = None, auth_protocol: str = None, auth_key: str = None,
-                            priv_protocol: str = None, priv_key: str = None) -> None:
+    def _set_snmp_api_state(
+        self,
+        protocol_enabled: bool,
+        version: str,
+        location: str | None = None,
+        community_read: str | None = None,
+        community_write: str | None = None,
+        security_name: str | None = None,
+        security_level: str | None = None,
+        auth_protocol: str | None = None,
+        auth_key: str | None = None,
+        priv_protocol: str | None = None,
+        priv_key: str | None = None,
+    ) -> None:
         # TODO: Finish SNMP before 0.1.0
         pass
 
     @abstractmethod
-    def set_snmp_v1_2_api_state(self, protocol_enabled: bool, location: str = None, community_read: str = None,
-                                community_write: str = None) -> None:
+    def set_snmp_v1_2_api_state(
+        self,
+        protocol_enabled: bool | None = None,
+        location: str | None = None,
+        community_read: str | None = None,
+        community_write: str | None = None,
+    ) -> None:
         """
         Sets the state and settings of the M2M SNMP v1,2c protocol currently set on the device. Enabling this,
         disables the v3 version of SNMP if it's active. Disabling SNMP requires a device restart.
@@ -979,6 +1075,7 @@ class NETIODevice(ABC):
         ----------
         protocol_enabled : bool
             Whether the protocol should be enabled or disabled. If disabling the protocol the device will restart.
+            If None, keeps the setting already set on the device.
         location : str
             The location of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
         community_read : str
@@ -992,9 +1089,17 @@ class NETIODevice(ABC):
         """
 
     @abstractmethod
-    def set_snmp_v3_api_state(self, protocol_enabled: bool, location: str = None, security_name: str = None,
-                              security_level: str = None, auth_protocol: str = None, auth_key: str = None,
-                              priv_protocol: str = None, priv_key: str = None) -> None:
+    def set_snmp_v3_api_state(
+        self,
+        protocol_enabled: bool | None = None,
+        location: str | None = None,
+        security_name: str | None = None,
+        security_level: str | None = None,
+        auth_protocol: str | None = None,
+        auth_key: str | None = None,
+        priv_protocol: str | None = None,
+        priv_key: str | None = None,
+    ) -> None:
         """
         Sets the state and settings of the M2M SNMP v3 protocol currently set on the device. Enabling this will
         disable the v1,2c version of the protocol if it's active. Disabling SNMP requires a device restart.
@@ -1002,6 +1107,7 @@ class NETIODevice(ABC):
         ----------
         protocol_enabled : bool
             Whether the protocol should be enabled or disabled. If disabling the protocol, the device will restart.
+            If None, keeps the setting already set on the device.
         location : str
             The location of the SNMP v3 protocol, if None, keeps the setting already set on the device.
         security_name : str
@@ -1037,7 +1143,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_telnet_api_state(self) -> Dict:
+    def get_telnet_api_state(self) -> dict[str, Any]:
         """
         Gets the state and settings of the telnet M2M protocol currently set on the device.
 
@@ -1048,16 +1154,22 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_telnet_api_state(self, protocol_enabled: bool, port: int = None, read_enabled: bool = None, read_auth:
-    Tuple[
-        str, str] = None, write_enabled: bool = None, write_auth: Tuple[str, str] = None) -> None:
+    def set_telnet_api_state(
+        self,
+        protocol_enabled: bool | None = None,
+        port: int | None = None,
+        read_enabled: bool | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_enabled: bool | None = None,
+        write_auth: tuple[str, str] | None = None,
+    ) -> None:
         """
         Sets the state and settings of the telnet M2M protocol currently set on the device.
 
         Parameters
         ----------
         protocol_enabled : bool
-            Whether the protocol should be enabled or disabled.
+            Whether the protocol should be enabled or disabled. If None, keeps the settings already on device.
         port: int
             The port on which the protocol will communicate. If None, keeps the settins already on device.
         read_enabled : bool
@@ -1081,16 +1193,16 @@ class NETIODevice(ABC):
     # region XML
     @abstractmethod
     def set_xml_api_state(
-            self,
-            protocol_enabled: bool,
-            read_enable: bool,
-            write_enable: bool,
-            read_auth: Tuple[str, str],
-            write_auth: Tuple[str, str],
+        self,
+        protocol_enabled: bool | None = None,
+        read_enable: bool | None = None,
+        write_enable: bool | None = None,
+        read_auth: tuple[str, str] | None = None,
+        write_auth: tuple[str, str] | None = None,
     ) -> None:
         """
-        Function for configuring the XML M2M on the device. All parameters are required and will be set to the ones
-        provided.
+        Function for configuring the XML M2M on the device. Any argument left as None keeps the value currently
+        configured on the device.
 
         Parameters
         ----------
@@ -1114,7 +1226,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_xml(self, xml_auth: Tuple[str, str]) -> Element:
+    def get_xml(self, xml_auth: tuple[str, str]) -> Element:
         """
         Gets the XML information from the device. This contains full information about the device.
 
@@ -1134,7 +1246,7 @@ class NETIODevice(ABC):
     # endregion
 
     @abstractmethod
-    def get_rules(self) -> List[Dict]:
+    def get_rules(self) -> list[dict[str, Any]]:
         """
         Gets the list of all rules on the device and their configuration.
 
@@ -1145,7 +1257,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_enabled_rules(self) -> List[Dict]:
+    def get_enabled_rules(self) -> list[dict[str, Any]]:
         """
         Gets the list of all enabled rules on the device and their configuration.
 
@@ -1156,7 +1268,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_disabled_rules(self) -> List[Dict]:
+    def get_disabled_rules(self) -> list[dict[str, Any]]:
         """
         Gets the list of all disabled rules on the device and their configuration.
 
@@ -1167,7 +1279,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_rule_by_name(self, rule_name: str) -> Dict:
+    def get_rule_by_name(self, rule_name: str) -> dict[str, Any]:
         """
         Gets a rule based on its name.
 
@@ -1183,7 +1295,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_watchdogs(self) -> List[Dict]:
+    def get_watchdogs(self) -> list[dict[str, Any]]:
         """
         Gets the list of all watchdogs, enabled or disabled on the device.
 
@@ -1194,7 +1306,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_enabled_watchdogs(self) -> List[Dict]:
+    def get_enabled_watchdogs(self) -> list[dict[str, Any]]:
         """
         Gets all enabled watchdogs  on the device.
 
@@ -1205,7 +1317,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_disabled_watchdogs(self) -> List[Dict]:
+    def get_disabled_watchdogs(self) -> list[dict[str, Any]]:
         """
         Gets all disabled watchdogs on the device.
 
@@ -1216,7 +1328,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_watchdog_by_name(self, watchdog_name: str) -> Dict:
+    def get_watchdog_by_name(self, watchdog_name: str) -> dict[str, Any]:
         """
         Gets a watchdog based on its name.
 
@@ -1231,7 +1343,7 @@ class NETIODevice(ABC):
         """
 
     @abstractmethod
-    def get_schedules(self) -> List[Dict]:
+    def get_schedules(self) -> list[dict[str, Any]]:
         """
         Gets the list of all the schedules available on the device.
 
@@ -1242,7 +1354,24 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_schedule_by_name(self, schedule_name: str) -> Dict:
+    def create_schedule(self, name: str, intervals: list[dict]) -> None:
+        """
+        Creates a scedulule on the device given its configuration JSON.
+
+        Parameters
+        ----------
+        name : str
+            Name of the schedule to create. Raises ElementAlreadyExists if a schedule of given name is already present.
+        intervals : list[dict]
+            A list of intervals where the schedule will be active.
+
+        Returns
+        -------
+
+        """
+
+    @abstractmethod
+    def get_schedule_by_name(self, schedule_name: str) -> dict[str, Any]:
         """
         Gets a schedule based on its name. Raises ElementNotFound if the schedule isn't found.
 
@@ -1274,7 +1403,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_schedule_names(self) -> List[str]:
+    def get_schedule_names(self) -> list[str]:
         """
         Gets all the schedules available on the device.
 
@@ -1285,7 +1414,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_active_schedules(self) -> List[Dict]:
+    def get_active_schedules(self) -> list[dict[str, Any]]:
         """
         Gets all the schedules that are currently active on the device.
 
@@ -1296,7 +1425,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def delete_schedule(self, schedule_id: id) -> None:
+    def delete_schedule(self, schedule_id: int) -> None:
         """
         Deletes a schedule from the device.
 
@@ -1325,13 +1454,13 @@ class NETIODevice(ABC):
         """
 
     @abstractmethod
-    def get_system_log(self) -> List[Dict]:
+    def get_system_log(self) -> list[dict[str, Any]]:
         """
         Gets the system log of the device.
 
         Returns
         -------
-        List[Dict]
+        list[dict[str, Any]]
             A list of JSON objects, where each dictionary contains details of a single system log entry. In the
             format of {"timestamp": "x", "type": "y", "message": "z"}
         """
@@ -1347,7 +1476,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_pabs(self) -> List[Dict]:
+    def get_pabs(self) -> list[dict[str, Any]]:
         """
         Gets the list of PABs, enabled or disabled on the device.
         Returns
@@ -1357,7 +1486,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_pab_by_name(self, pab_name: str) -> Dict:
+    def get_pab_by_name(self, pab_name: str) -> dict[str, Any]:
         """
         Gets a PAB and its configuration based on its name. Raises ElementNotFound if the PAB isn't found.
 
@@ -1373,7 +1502,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_enabled_pabs(self) -> List[Dict]:
+    def get_enabled_pabs(self) -> list[dict[str, Any]]:
         """
         Gets the list of enabled PABs on the device.
 
@@ -1384,7 +1513,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def get_disabled_pabs(self) -> List[Dict]:
+    def get_disabled_pabs(self) -> list[dict[str, Any]]:
         """
         Gets the list of disabled PABs on the device.
 
@@ -1409,3 +1538,190 @@ class NETIODevice(ABC):
 
         """
         pass
+
+    @abstractmethod
+    def upload_https_private_key(self, keyfile: str) -> None:
+        pass
+
+    @abstractmethod
+    def upload_https_certificate(self, certfile: str) -> None:
+        pass
+
+    @abstractmethod
+    def get_version_revision(self) -> str:
+        """
+        Fetches the revision of the current firmware version.
+
+        Returns
+        -------
+        str
+            8-digit hash of the version revision
+        """
+        pass
+
+    @abstractmethod
+    def get_input_list(self) -> dict[str, Any]:
+        pass
+
+    @abstractmethod
+    def get_input_data(self, input_id: int) -> dict[str, Any]:
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_system_datetime(self) -> dict[str, Any]:
+        """
+        Gets current system date, time, timezone, and NTP configuration.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def set_system_datetime(
+        self,
+        ntp_enabled: bool | None = None,
+        ntp_server: str | None = None,
+        timezone: str | None = None,
+        time: int | None = None,
+    ) -> None:
+        """
+        Sets system date, time, timezone, and NTP configuration. Any argument left as None keeps the value
+        currently configured on the device.
+
+        Parameters
+        ----------
+        ntp_enabled: bool | None
+            Whether the device synchronises its clock with an NTP server.
+        ntp_server: str | None
+            The NTP server to synchronise with, e.g. "pool.ntp.org".
+        timezone: str | None
+            The timezone name, e.g. "Europe/Prague".
+        time: int | None
+            The device time as a Unix timestamp in seconds.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def system_reset(self) -> None:
+        """
+        Triggers an immediate system reset (reboot).
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_ethernet_settings(self) -> dict[str, Any]:
+        """
+        Gets Ethernet network interface configuration (MAC, networkMode, IP, netmask, gateway, DNS).
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def set_ethernet_settings(
+        self,
+        network_mode: str | None = None,
+        ip: str | None = None,
+        netmask: str | None = None,
+        gateway: str | None = None,
+        dns: str | None = None,
+    ) -> None:
+        """
+        Sets Ethernet network interface configuration (DHCP or static IP parameters).
+        Any argument left as None keeps the value currently configured on the device. When switching from DHCP to
+        "static", ip, netmask and gateway are required.
+
+        Parameters
+        ----------
+        network_mode: str | None
+            Either "dhcp" or "static".
+        ip: str | None
+            The IPv4 address the device should use.
+        netmask: str | None
+            The network mask for the subnet.
+        gateway: str | None
+            Gateway IPv4 for the device.
+        dns: str | None
+            The DNS server the device will use for domain resolution.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_ethernet_status(self) -> dict[str, Any]:
+        """
+        Gets Ethernet interface connection status.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_wifi_status(self) -> dict[str, Any]:
+        """
+        Gets Wi-Fi interface link and connection status.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_server_settings(self) -> dict[str, Any]:
+        """
+        Gets web server HTTP / HTTPS ports and enablement configuration.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def set_server_settings(
+        self,
+        http_enable: bool | None = None,
+        http_port: int | None = None,
+        https_enable: bool | None = None,
+        https_port: int | None = None,
+    ) -> None:
+        """
+        Sets web server HTTP / HTTPS ports and enablement configuration.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_global_measurement(self) -> dict[str, Any]:
+        """
+        Gets device-wide global power measurements (voltage, frequency, total energy, power factor, etc.).
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_outputs_list(self) -> list[dict[str, Any]]:
+        """
+        Gets summary list of outputs with socket types, schedule associations, and status.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_firmware_updates_list(self) -> list[dict[str, Any]]:
+        """
+        Queries available firmware updates from the cloud service.
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_system_lock(self) -> dict[str, Any]:
+        """
+        Gets current system lock status (e.g. while performing cloud synchronization).
+        """
+        pass
+
+    # TODO: Review method
+    @abstractmethod
+    def get_system_notifications(self) -> list[dict[str, Any]]:
+        """
+        Gets active system notification/error messages.
+        """
+        pass
+

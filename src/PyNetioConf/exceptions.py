@@ -3,6 +3,11 @@ class NetioException(Exception):
     pass
 
 
+class ElementAlreadyExists(NetioException):
+    """Raised when trying to create an element that already exists"""
+    pass
+
+
 class ProtocolNotEnabled(NetioException):
     """Raised when the protocol is not enabled on the device"""
     pass

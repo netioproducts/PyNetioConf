@@ -8,3 +8,6 @@ __pycache__
 .package
 *.egg-info
 .DS_Store
+devhelpers/
+tests/
+.venv/

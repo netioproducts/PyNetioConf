@@ -1,3 +1,50 @@
+[project]
+name = "PyNetioConf"
+version = "0.3.0b1"
+requires-python = ">= 3.10"
+authors = [
+    { name = "NETIO products a.s.", email = "support@netio.eu" }
+]
+maintainers = [
+    { name = "Jakub Šperl", email = "jsperl@netio.eu" }
+]
+
+description = "Universal module to control and configure all NETIO devices"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["NETIO"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Development Status :: 4 - Beta",
+]
+
+dependencies = [
+    "websocket-client",
+    "requests",
+    "urllib3",
+    "typing-extensions>=4.4.0; python_version < '3.12'"
+]
+
+[project.urls]
+Homepage = "https://netio-products.com/"
+Repository = "https://github.com/netioproducts/PyNetioConf"
+Issues = "https://github.com/netioproducts/PyNetioConf/issues"
+Changelog = "https://github.com/netioproducts/PyNetioConf/blob/main/CHANGELOG.md"
+
 [build-system]
-requires = ["setuptools", "wheel", "websocket-client"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.12.22,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "PyNetioConf"
+# uv_build does not read .gitignore; keep local-only folders out of builds made outside CI.
+source-exclude = [".venv", "devhelpers"]
