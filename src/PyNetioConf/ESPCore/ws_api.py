@@ -151,10 +151,16 @@ def send_request(
                 return message_data
             else:
                 return json.loads(message)
-        except (BrokenPipeError, WebSocketConnectionClosedException):
+        except (
+            BrokenPipeError,
+            WebSocketConnectionClosedException,
+            ConnectionResetError,
+        ):
             # This most likely means that the device has rebooted, or just lost connection for other reasons.
             # Try to reconnect first, then consider the connection lost.
             device.login(device.username, device.password, logout=True)
+            if topic == "system/reset":
+                return {}
             continue
         except Exception as e:
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
