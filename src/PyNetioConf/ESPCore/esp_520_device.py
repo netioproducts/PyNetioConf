@@ -107,7 +107,7 @@ class ESP520Device(ESP500Device):
                 newer, requests use GET instead of SUBSCRIBE. Default (5, 2, 0).
             ssl_options : dict[str, Any]
                 SSL options passed to websocket-client as sslopt whenever the connection is (re)opened over wss://.
-                NetioManager does not pass this. Default {}.
+                NetioManager builds this from the ssl_* keyword arguments of init_device. Default {}.
         """
         self.host = host
         self.username = username
@@ -134,6 +134,7 @@ class ESP520Device(ESP500Device):
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
+        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
         if kwargs.get("is_ws_auth", False):
             self.session_id = "TODO AUTH"
         else:
@@ -148,7 +149,6 @@ class ESP520Device(ESP500Device):
         atexit.register(self._cleanup)
 
         # New Init
-        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
         self.logger = logging.getLogger(self.__class__.__name__)
         self.netio_manager = netio_manager
         # self.fw_version = self.get_version()
@@ -158,8 +158,8 @@ class ESP520Device(ESP500Device):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
-        self._ws_helo_data = kwargs.get(
-            "ws_helo_data", ws_api.send_request(self, "HELO")
+        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(
+            self, "HELO"
         )
 
     # TODO: Handle repeated code for uploading files using chunking

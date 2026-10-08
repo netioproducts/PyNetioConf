@@ -130,7 +130,7 @@ class ESP500Device(NETIODevice):
                 newer, requests use GET instead of SUBSCRIBE. Default (5, 1, 3).
             ssl_options : dict[str, Any]
                 SSL options passed to websocket-client as sslopt whenever the connection is (re)opened over wss://.
-                NetioManager does not pass this. Default {}.
+                NetioManager builds this from the ssl_* keyword arguments of init_device. Default {}.
         """
         self.host = host
         self.username = username
@@ -161,6 +161,7 @@ class ESP500Device(NETIODevice):
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
+        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
         if kwargs.get("is_ws_auth", False):
             self.session_id = "TODO AUTH"
         else:
@@ -175,7 +176,6 @@ class ESP500Device(NETIODevice):
         atexit.register(self._cleanup)
 
         # New Init
-        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
         self.logger = logging.getLogger(self.__class__.__name__)
         self.netio_manager = netio_manager
         # self.fw_version = self.get_version()
@@ -185,8 +185,8 @@ class ESP500Device(NETIODevice):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
-        self._ws_helo_data = kwargs.get(
-            "ws_helo_data", ws_api.send_request(self, "HELO")
+        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(
+            self, "HELO"
         )
 
     def _keep_alive(self) -> None:
@@ -1575,7 +1575,8 @@ class ESP500Device(NETIODevice):
         )
         user_cfg_res = ws_api.send_request(self, ws_type, ws_topic)
         user_data = user_cfg_res["data"]
-        public_key = self._ws_helo_data.get("publicKey", "")
+        hello_response = ws_api.send_request(self, "HELO")
+        public_key = hello_response["data"]["publicKey"]
         password_hash = ws_api.generate_password_hash(
             username, new_password, public_key
         )

@@ -181,6 +181,7 @@ def initialize_esp(
     patch = 0
     try:
         try_count = 3 if not kwargs.get("ws_expected", False) else 15
+        ssl_options = _setup_ssl(**kwargs)[1] if use_https else {}
 
         ws = _try_connect_websocket(host, use_https, try_count, **kwargs)
         ws_req_id = 0
@@ -288,6 +289,7 @@ def initialize_esp(
                 is_ws_auth=True if ws is not None else False,
                 ws_helo_data=hello_response,
                 device_version=(int(version), int(minor), int(patch)),
+                ssl_options=ssl_options,
             )
             return netio_device
         elif int(minor) >= 2:
@@ -307,6 +309,7 @@ def initialize_esp(
                 is_ws_auth=True if ws is not None else False,
                 ws_helo_data=hello_response,
                 device_version=(int(version), int(minor), int(patch)),
+                ssl_options=ssl_options,
             )
             return netio_device
         elif int(minor) == 1:
@@ -326,6 +329,7 @@ def initialize_esp(
                 is_ws_auth=True if ws is not None else False,
                 ws_helo_data=hello_response,
                 device_version=(int(version), int(minor), int(patch)),
+                ssl_options=ssl_options,
             )
             return netio_device
         else:
