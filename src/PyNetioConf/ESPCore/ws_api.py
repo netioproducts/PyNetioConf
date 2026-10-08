@@ -72,7 +72,7 @@ def send_request(
     while True:
         try:
             if device.ws is None:
-                device.login(device.password, device.username)
+                device.login(device.username, device.password)
             if device.ws is None:
                 raise ConnectionError("Couldn't establish a WebSocket connection")
             device.ws.send(json.dumps(request, ensure_ascii=False))

@@ -89,7 +89,7 @@ class NetioManager:
             The updated device object.
         """
         for index, device in enumerate(self._connected_devices):
-            if netio_device.sn_number == device.sn_number:
+            if device is netio_device:
                 updated_device = esp_device_init.initialize_esp(
                     device.host,
                     device.username,

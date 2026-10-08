@@ -61,7 +61,7 @@ class NETIODevice(ABC):
 
         # Keep an instace of NetioManager for updating device classes during
         # firmware updates.
-        self.netio_manager = None
+        self.netio_manager = netio_manager
 
     # region Session
     @abstractmethod

@@ -1250,7 +1250,7 @@ class ESP500Device(NETIODevice):
         ws_topic = "outputs/measure"
 
         self.logger.debug(f"Fetching outputs measurement data from device {self.host}")
-        return ws_api.send_request(self, ws_type, ws_topic)["data"]
+        return ws_api.send_request(self, ws_type, ws_topic)["data"]["items"]
 
     @override
     def get_output_states(self) -> list[tuple[int, bool]]:
@@ -1403,7 +1403,7 @@ class ESP500Device(NETIODevice):
             )
 
         updated_instance = None
-        if type(self.netio_manager) is NetioManager:
+        if isinstance(self.netio_manager, NetioManager):
             updated_instance = self.netio_manager.update_device(self)
 
         if not updated_instance:

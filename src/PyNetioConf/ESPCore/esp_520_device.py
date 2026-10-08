@@ -287,7 +287,7 @@ class ESP520Device(ESP500Device):
         #     )
 
         updated_instance = None
-        if type(self.netio_manager) is NetioManager:
+        if isinstance(self.netio_manager, NetioManager):
             updated_instance = self.netio_manager.update_device(self, ws_expected=True)
 
         if isinstance(updated_instance, NETIODevice):
