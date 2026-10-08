@@ -52,6 +52,7 @@ class NETIODevice(ABC):
         self.use_https = use_https
         self._request_queue: deque[dict[str, Any]] = deque()
         self._pong_queue: deque[dict[str, Any]] = deque()
+        self.version = (0, 0, 0)
         if use_https:
             from urllib3 import disable_warnings
             from urllib3.exceptions import InsecureRequestWarning
@@ -1724,4 +1725,3 @@ class NETIODevice(ABC):
         Gets active system notification/error messages.
         """
         pass
-

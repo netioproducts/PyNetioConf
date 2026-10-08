@@ -54,7 +54,7 @@ class NetioManager:
         password: str
             Password for the user.
         keep_alive: bool
-            If True, the connection will be kept alive by sending a keep alive packet every 30 seconds.
+            If True, the connection will be kept alive by sending a keep alive packet every 120 seconds.
         use_https: bool
             Makes the communication with the device based on HTTPs, the protocol must be enabled on the device
             in the security settings.

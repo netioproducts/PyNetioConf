@@ -29,9 +29,9 @@ class _FileChunk(NamedTuple):
 
 def send_request(
     device: NETIODevice,
-    type: str,
-    topic: str | None = None,
-    data: dict[str, Any] | None = None,
+    ws_type: str,
+    ws_topic: str | None = None,
+    ws_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Send a request to the device's websocket API and return the response.
@@ -53,22 +53,28 @@ def send_request(
     if device.ws is None:
         device.login(device.username, device.password)
 
-    request: dict[str, Any] = {"type": type, "reqId": device.ws_req_id}
+    if device.version:
+        if (
+            device.version[0] > 5 or (device.version[0] == 5 and device.version[1] >= 4)
+        ) and ws_type == "SUBSCRIBE":
+            ws_type = "GET"
+
+    request: dict[str, Any] = {"type": ws_type, "reqId": device.ws_req_id}
     unsubscribe_needed = False
     expected_reqest_id = device.ws_req_id
-    if type == "SUBSCRIBE":
+    if ws_type == "SUBSCRIBE":
         unsubscribe_needed = True
-    if topic:
-        request["topic"] = topic
-    if data:
-        request["data"] = data
+    if ws_topic:
+        request["topic"] = ws_topic
+    if ws_data:
+        request["data"] = ws_data
     logger.debug(f"Sending request to {device.host} with payload {request}")
     while True:
         try:
             if device.ws is None:
-                raise CommunicationError(
-                    "No websocket connection associated with the device"
-                )
+                device.login(device.password, device.username)
+            if device.ws is None:
+                raise ConnectionError("Couldn't establish a WebSocket connection")
             device.ws.send(json.dumps(request, ensure_ascii=False))
             sleep(
                 WS_EXECUTION_DELAY  # TODO: Tie to device/NM
@@ -82,8 +88,8 @@ def send_request(
                     "type": "UNSUBSCRIBE",
                     "reqId": device.ws_req_id,
                 }
-                if topic:
-                    unsubscribe_request["topic"] = topic
+                if ws_topic:
+                    unsubscribe_request["topic"] = ws_topic
                 logger.debug(
                     f"Sending request to {device.host} with payload {unsubscribe_request}"
                 )
@@ -146,6 +152,8 @@ def send_request(
                         # We shouldn't be able to get here with queuing since we filter EVENTs completely now
                         logger.debug(f"Throwing away websocket message: {message}")
                         continue
+                else:
+                    logger.debug(f"Ignored event: {message}")
 
             if message_data:
                 return message_data
@@ -159,7 +167,7 @@ def send_request(
             # This most likely means that the device has rebooted, or just lost connection for other reasons.
             # Try to reconnect first, then consider the connection lost.
             device.login(device.username, device.password, logout=True)
-            if topic == "system/reset":
+            if ws_topic == "system/reset":
                 return {}
             continue
         except Exception as e:

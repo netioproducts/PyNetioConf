@@ -271,7 +271,26 @@ def initialize_esp(
         return netio_device
 
     if int(version) == 5:
-        if int(minor) >= 2:
+        if int(minor) >= 4:
+            from .esp_540_device import ESP540Device
+
+            netio_device = ESP540Device(
+                host,
+                username,
+                password,
+                "",
+                "",
+                keep_alive,
+                netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                use_https,
+                ws_connection=ws,
+                ws_req_id=ws_req_id,
+                is_ws_auth=True if ws is not None else False,
+                ws_helo_data=hello_response,
+                device_version=(int(version), int(minor), int(patch)),
+            )
+            return netio_device
+        elif int(minor) >= 2:
             from .esp_520_device import ESP520Device
 
             netio_device = ESP520Device(
@@ -287,6 +306,7 @@ def initialize_esp(
                 ws_req_id=ws_req_id,
                 is_ws_auth=True if ws is not None else False,
                 ws_helo_data=hello_response,
+                device_version=(int(version), int(minor), int(patch)),
             )
             return netio_device
         elif int(minor) == 1:
@@ -305,6 +325,7 @@ def initialize_esp(
                 ws_req_id=ws_req_id,
                 is_ws_auth=True if ws is not None else False,
                 ws_helo_data=hello_response,
+                device_version=(int(version), int(minor), int(patch)),
             )
             return netio_device
         else:

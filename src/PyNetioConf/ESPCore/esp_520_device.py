@@ -56,29 +56,58 @@ class ESP520Device(ESP500Device):
         **kwargs: Any,
     ):
         """
-        The 5.x.x versions of Netio firmware have been severely redesigned which includes the entirety of the API that is used for communication with the device therefore this init is completely separated from the base classes and does not call super().__init__ but instead makes a new class from scratch. If the base NETIODevice class gets updated this has to be done accordingly here.
+        Creates the device object for a NETIO device running firmware 5.2.x and 5.3.x. This is normally not called
+        directly: NetioManager.init_device detects the firmware version, opens and authenticates the WebSocket
+        connection, and passes that connection state in through kwargs.
+
+        The 5.x.x versions of Netio firmware have been severely redesigned, which includes the entirety of the API
+        used to communicate with the device. Therefore this init is completely separate from the base classes and
+        does not call super().__init__. If the base NETIODevice class gets updated, this has to be updated
+        accordingly.
 
         Parameters
         ----------
         host : str
-
+            IP address or hostname of the device, without any URL parts such as 'http://'.
         username : str
-
+            Username to log in with. Note that many actions require administrator privileges.
         password : str
-
+            Password for the user.
         sn_number : str
-
+            Serial number of the device. NetioManager passes an empty string; the 5.x classes don't use it.
         hostname : str
-
-         : Any
-
+            Network hostname of the device. NetioManager passes an empty string; the 5.x classes don't use it.
         keep_alive : bool
-
+            If True, a background thread pings the device every 120 seconds to keep the WebSocket session open.
         netio_manager : NetioManager | None
-
+            The NetioManager instance the device belongs to. Used after a firmware update to replace the object
+            with the class that matches the new firmware version.
         use_https : bool
+            Communicate over HTTPS and secure WebSockets (wss://) instead of HTTP and ws://. HTTPS must be enabled
+            on the device. Also silences urllib3's InsecureRequestWarning, since devices use self-signed
+            certificates.
+        **kwargs : Any
+            Connection state handed over by NetioManager. None of these are required when creating the object by
+            hand, but without them the init opens and authenticates a new connection itself.
 
-
+            ws_connection : websocket.WebSocket | None
+                An open WebSocket connection to the device. If None, a new connection is opened on login.
+                Default None.
+            is_ws_auth : bool
+                Whether ws_connection is already authenticated. If True the login step is skipped, otherwise the
+                init logs in with username and password. Default False.
+            ws_req_id : int
+                The next request ID to use, so that IDs continue from the requests already sent on
+                ws_connection. Default 0.
+            ws_helo_data : dict[str, Any]
+                The device's full reply to the initial HELO request, which carries the public key used for password
+                hashing. If not given, a new HELO request is sent. Default None.
+            device_version : tuple[int, int, int]
+                Firmware version of the device as (major, minor, patch). Also selects the API dialect: on 5.2.x and
+                newer, requests use GET instead of SUBSCRIBE. Default (5, 2, 0).
+            ssl_options : dict[str, Any]
+                SSL options passed to websocket-client as sslopt whenever the connection is (re)opened over wss://.
+                NetioManager does not pass this. Default {}.
         """
         self.host = host
         self.username = username
@@ -92,6 +121,7 @@ class ESP520Device(ESP500Device):
         self._keep_alive_flag = keep_alive
         self.ws_req_id = kwargs.get("ws_req_id", 0)
         self.use_https = use_https
+        self.version = kwargs.get("device_version", (5, 2, 0))
         if use_https:
             from urllib3 import disable_warnings
             from urllib3.exceptions import InsecureRequestWarning
@@ -128,6 +158,9 @@ class ESP520Device(ESP500Device):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
+        self._ws_helo_data = kwargs.get(
+            "ws_helo_data", ws_api.send_request(self, "HELO")
+        )
 
     # TODO: Handle repeated code for uploading files using chunking
     @override
