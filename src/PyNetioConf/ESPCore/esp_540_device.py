@@ -167,7 +167,8 @@ class ESP540Device(ESP520Device):
         atexit.register(self._cleanup)
 
         # New Init
-        self.logger = logging.getLogger(self.__class__.__name__)
+        # Logger of the module the class is defined in, so it stays under the package hierarchy for subclasses too
+        self.logger = logging.getLogger(type(self).__module__)
         self.netio_manager = netio_manager
         # self.fw_version = self.get_version()
 

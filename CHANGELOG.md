@@ -18,6 +18,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 - `ws_api.login` raises `CommunicationError` when the connection fails during authentication, instead of passing on
   the WebSocket or socket exception.
+- 5.x devices log to the logger of their module, such as `PyNetioConf.ESPCore.esp_540_device`, instead of a logger
+  named after the class, such as `ESP540Device`. Configuring the `PyNetioConf` logger now also covers them; code that
+  configured the class-named loggers has to switch to the module names.
 - The parameters of `ws_api.send_request` are renamed from `type`, `topic` and `data` to `ws_type`, `ws_topic` and
   `ws_data`. Code that calls it with keyword arguments has to be updated.
 - Creating a 5.x device no longer sends an extra HELO request when `NetioManager` already passed the HELO reply in.
