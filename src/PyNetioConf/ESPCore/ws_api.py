@@ -6,12 +6,16 @@ import math
 import random
 from collections.abc import Generator
 from io import BufferedIOBase
-from time import sleep
+from time import perf_counter, sleep
 from typing import Any, BinaryIO, NamedTuple, Tuple
 
 from websocket import WebSocket, WebSocketConnectionClosedException
 
-from PyNetioConf.constants import WS_EXECUTION_DELAY
+from PyNetioConf.constants import (
+    WS_EXECUTION_DELAY,
+    WS_RECONNECT_INTERVAL,
+    WS_RECONNECT_TIMEOUT,
+)
 
 from ..exceptions import CommunicationError
 from ..netio_device import NETIODevice
@@ -69,6 +73,8 @@ def send_request(
     if ws_data:
         request["data"] = ws_data
     logger.debug(f"Sending request to {device.host} with payload {request}")
+    reconnect_deadline: float | None = None
+    last_reconnect: float | None = None
     while True:
         try:
             if device.ws is None:
@@ -165,13 +171,49 @@ def send_request(
             ConnectionResetError,
         ):
             # This most likely means that the device has rebooted, or just lost connection for other reasons.
-            # Try to reconnect first, then consider the connection lost.
-            device.login(device.username, device.password, logout=True)
+            # Keep reconnecting for WS_RECONNECT_TIMEOUT seconds, then consider the connection lost.
+            if reconnect_deadline is None:
+                reconnect_deadline = perf_counter() + WS_RECONNECT_TIMEOUT
+            elif perf_counter() >= reconnect_deadline:
+                raise CommunicationError(
+                    f"Connection to {device.host} kept dropping for {WS_RECONNECT_TIMEOUT} seconds."
+                )
+            last_reconnect = _reconnect(device, reconnect_deadline, last_reconnect)
             if ws_topic == "system/reset":
                 return {}
             continue
         except Exception as e:
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
+
+
+def _reconnect(device: NETIODevice, deadline: float, last_attempt: float | None) -> float:
+    """
+    Logs back in after the connection to the device dropped. Logins start at most every WS_RECONNECT_INTERVAL
+    seconds, counted from last_attempt, and failed ones are retried until the deadline passes. Both times are
+    perf_counter() values.
+
+    Returns
+    -------
+        The start time of the successful login, to pass as last_attempt if the connection drops again.
+    """
+    while True:
+        if last_attempt is not None:
+            wait = min(
+                last_attempt + WS_RECONNECT_INTERVAL - perf_counter(),
+                deadline - perf_counter(),
+            )
+            if wait > 0:
+                sleep(wait)
+        last_attempt = perf_counter()
+        try:
+            device.login(device.username, device.password, logout=True)
+            return last_attempt
+        except CommunicationError:
+            if perf_counter() >= deadline:
+                raise CommunicationError(
+                    f"Couldn't reconnect to {device.host} within {WS_RECONNECT_TIMEOUT} seconds."
+                )
+            logger.debug(f"Reconnecting to {device.host} failed, retrying.")
 
 
 def _gen_file_chunks(
@@ -311,10 +353,15 @@ def login(
     }
     if device.ws is None:
         raise CommunicationError("No websocket connection associated with the device")
-    device.ws.send(json.dumps(request, ensure_ascii=False))
-    logger.debug(f"Sending authentication request to {device.host}, payload: {request}")
-    device.ws_req_id += 1
-    message = device.ws.recv()
+    try:
+        device.ws.send(json.dumps(request, ensure_ascii=False))
+        logger.debug(
+            f"Sending authentication request to {device.host}, payload: {request}"
+        )
+        device.ws_req_id += 1
+        message = device.ws.recv()
+    except Exception as e:
+        raise CommunicationError(f"Failed to log in to {device.host}", str(e))
     logger.debug(
         f"Received authentication response from {device.host}, payload: {message}"
     )

@@ -9,7 +9,7 @@ import ssl
 import sys
 from collections import deque
 from io import BytesIO
-from time import perf_counter, sleep
+from time import sleep
 from xml.etree.ElementTree import Element
 
 from PyNetioConf.constants import (
@@ -168,7 +168,13 @@ class ESP500Device(NETIODevice):
             self.session_id = self.login(username, password)
         # self.supported_features = self.get_features()
         # self.output_count: int = self.supported_features["outputCount"]
-        # self.user_permissions = self.get_current_user()["privileges"]
+        try:
+            self.user_permissions = self.get_user_privileges(username)
+        except (CommunicationError, ElementNotFound):
+            self.logger.warning(
+                f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
+            )
+        self._ka_thread: threading.Timer | None = None
         if keep_alive:
             self._ka_thread = threading.Timer(120, self._keep_alive)
             self._ka_thread.daemon = True
@@ -199,8 +205,13 @@ class ESP500Device(NETIODevice):
         if logout:
             self.ws = None  # Disables a connection if one was present, the device handles the logout automatically
 
-        if self.ws is None:
-            try:
+        # Each attempt connects if needed, then sends HELO and AUTH. The AUTH token is built from the HELO reply, so a
+        # dropped connection needs the whole sequence again. HELO doesn't go through send_request, which would call
+        # login again when there is no connection.
+        reconnected = False
+        try_count = 3
+        for attempt in range(try_count):
+            if self.ws is None:
                 # If the KA thread is alive it can send requests while the device is reconnecting on the old pipe.
                 if self._ka_thread:
                     self._ka_thread.cancel()
@@ -208,17 +219,11 @@ class ESP500Device(NETIODevice):
                     self.logger.debug(
                         "Disabled keep-alive thread due to new login process."
                     )
-            except AttributeError:
-                pass  # No need to clean up a non existant thread
 
-            try_count = 3
-            self.logger.debug(f"Attempting websocket connection to {self.host}")
-            for attempt in range(try_count):
                 self.logger.debug(
                     f"{self.host} websocket connection attempt {attempt + 1}/{try_count}"
                 )
                 try:
-                    connection_dt_start = perf_counter()
                     if self.use_https:
                         self.ws = websocket.create_connection(
                             f"wss://{self.host}/emweb",
@@ -229,46 +234,48 @@ class ESP500Device(NETIODevice):
                         self.ws = websocket.create_connection(
                             f"ws://{self.host}/emweb", timeout=10
                         )  # pyright: ignore[reportUnknownMemberType]
-
-                    if isinstance(self.ws, WebSocket):
-                        self.logger.debug(f"Succesfully connected to {self.host}")
-                        break
-                    else:
-                        elapsed_time = perf_counter() - connection_dt_start
-                        if elapsed_time < 10:
-                            self.logger.debug(
-                                "Couldn't establish ws connection in time, waiting to reconnect."
-                            )
-                            sleep(10 - elapsed_time)
-                except Exception as e:
+                except Exception:
                     self.logger.debug(
                         f"Connection to {self.host} failed on {attempt + 1}/{try_count}"
                     )
                     sleep(1)
                     continue
 
-            if isinstance(self.ws, WebSocket):
-                self.logger.debug(f"Setting default timeout for {self.host}.")
+                self.logger.debug(f"Succesfully connected to {self.host}")
                 self.ws.settimeout(WS_DEFAULT_TIMEOUT)
+                self.ws_req_id = 0
+                reconnected = True
 
-            self.ws_req_id = 0
+            try:
+                hello_response = ws_api.device_init_request(
+                    self.ws, self.ws_req_id, "HELO", self.host
+                )
+                self.ws_req_id += 1
+                ws_api.login(
+                    self,
+                    hello_response["data"]["localTimestamp"],
+                    hello_response["data"]["publicKey"],
+                    username,
+                    password,
+                )
+            except CommunicationError:
+                self.logger.debug(
+                    f"Login to {self.host} failed on {attempt + 1}/{try_count}"
+                )
+                self.ws = None
+                sleep(1)
+                continue
 
-            if self._keep_alive_flag:
+            if reconnected and self._keep_alive_flag:
                 self._ka_thread = threading.Timer(120, self._keep_alive)
                 self._ka_thread.daemon = True
                 self._ka_thread.start()
 
-        hello_response = ws_api.send_request(self, "HELO")
+            return "TODO: Authenticate Session ID on 5.x.x"
 
-        ws_api.login(
-            self,
-            hello_response["data"]["localTimestamp"],
-            hello_response["data"]["publicKey"],
-            username,
-            password,
+        raise CommunicationError(
+            f"Couldn't log in to device {self.host} after {try_count} attempts."
         )
-
-        return "TODO: Authenticate Session ID on 5.x.x"
 
     @override
     def logout(self) -> None:
@@ -1336,16 +1343,15 @@ class ESP500Device(NETIODevice):
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
         esp_api.send_file(self, "/cfgimport", encoded_data)
         self.logger.info(
-            f"Imported configuration from {file.name}, device {self.host} is restarting..."
+            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is restarting..."
         )
         sleep(kwargs.get("sleep_time", 15))
         username = kwargs.get("username", self.username)
         password = kwargs.get("password", self.password)
 
         if kwargs.get("login", True):
-            self._login_new(username, password)
-            if self._ka_thread:
-                self._keep_alive()
+            # logout=True drops the connection that ended with the device restart, login also restarts the keep-alive
+            self.login(username, password, logout=True)
 
     @override
     def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
@@ -1384,13 +1390,13 @@ class ESP500Device(NETIODevice):
                 f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
             )
         self.logger.debug(
-            f"Uploaded firmware {file.name}, device {self.host} might be unresponsive for a while."
+            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive for a while."
         )
 
         sleep(pre_reconnect_wait)
 
         self.logger.debug(
-            f"Retrying connection to device {self.host} after updating firmware to {file.name}."
+            f"Retrying connection to device {self.host} after updating firmware to {getattr(file, 'name', 'in-memory file')}."
         )
         device_response_time = esp_api.check_connectivity(self)
         retry_limit = 3 if device_response_time == -1 else 0

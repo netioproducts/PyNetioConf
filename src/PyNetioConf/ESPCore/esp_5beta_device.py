@@ -194,7 +194,7 @@ class ESP5BetaDevice(ESP400Device):
         ws_api.send_request(self, "SET", "system/cfgimport", data={})
         esp_api.send_file(self, "/cfgimport", encoded_data)
         self.logger.info(
-            f"Imported configuration from {file.name}, device {self.host} is restarting..."
+            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is restarting..."
         )
         sleep(kwargs.get("sleep_time", 15))
         username = kwargs.get("username", self.username)
@@ -240,13 +240,13 @@ class ESP5BetaDevice(ESP400Device):
                 f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
             )
         self.logger.debug(
-            f"Uploaded firmware {file.name}, device {self.host} might be unresponsive for a while."
+            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive for a while."
         )
 
         sleep(pre_reconnect_wait)
 
         self.logger.debug(
-            f"Retrying connection to device {self.host} after updating firmware to {file.name}."
+            f"Retrying connection to device {self.host} after updating firmware to {getattr(file, 'name', 'in-memory file')}."
         )
         device_response_time = esp_api.check_connectivity(self)
         retry_limit = 3 if device_response_time == -1 else 0

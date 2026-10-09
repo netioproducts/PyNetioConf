@@ -141,7 +141,13 @@ class ESP520Device(ESP500Device):
             self.session_id = self.login(username, password)
         # self.supported_features = self.get_features()
         # self.output_count: int = self.supported_features["outputCount"]
-        # self.user_permissions = self.get_current_user()["privileges"]
+        try:
+            self.user_permissions = self.get_user_privileges(username)
+        except (CommunicationError, ElementNotFound):
+            self.logger.warning(
+                f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
+            )
+        self._ka_thread: threading.Timer | None = None
         if keep_alive:
             self._ka_thread = threading.Timer(120, self._keep_alive)
             self._ka_thread.daemon = True
@@ -214,7 +220,17 @@ class ESP520Device(ESP500Device):
         )
 
     @override
-    def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
+    def update_firmware(
+        self, file: str | os.PathLike[str] | io.BufferedIOBase
+    ) -> NETIODevice:
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as firmware_file:
+                return self.update_firmware(firmware_file)
+        if not isinstance(file, io.BufferedIOBase):
+            raise TypeError(
+                f"Unsupported file type {type(file).__name__}, expected a path or a file opened in binary mode."
+            )
+
         # TODO: Implement permission checks
         # if "can_alter_settings" not in self.user_permissions:
         #     raise PermissionError(
@@ -255,10 +271,7 @@ class ESP520Device(ESP500Device):
                 "uploadId"
             ]
 
-            if isinstance(file, io.BufferedIOBase):
-                ws_api.upload_file(self, file, upload_id)
-            else:
-                self.logger.debug("Unsupported file format.")
+            ws_api.upload_file(self, file, upload_id)
         except CommunicationError:
             self.logger.warning(
                 f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
@@ -301,24 +314,28 @@ class ESP520Device(ESP500Device):
         return updated_instance
 
     @override
-    def import_config(self, file, **kwargs):
+    def import_config(
+        self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs
+    ):
         ws_type = "SET"
         ws_topic = "system/cfgimport"
         ws_data = {}
+
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as config_file:
+                return self.import_config(config_file, **kwargs)
+        if isinstance(file, io.TextIOBase):
+            file = io.BytesIO(file.read().encode("utf-8"))
+        if not isinstance(file, io.BufferedIOBase):
+            raise TypeError(
+                f"Unsupported file type {type(file).__name__}, expected a path or a file object."
+            )
+
+        self.logger.debug(f"Importing configuration to host {self.host}")
         upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
             "uploadId"
         ]
-
-        if isinstance(file, io.BufferedIOBase):
-            self.logger.debug(f"Importing configuration to host {self.host}")
-            ws_api.upload_file(self, file, upload_id)
-        elif isinstance(file, str):
-            file_path = Path(file)
-            if file_path.exists():
-                with open(file, "rb") as file:
-                    ws_api.upload_file(self, file, upload_id)
-        else:
-            self.logger.debug("Unsupported file format.")
+        ws_api.upload_file(self, file, upload_id)
 
     @override
     def ping(self) -> bool:

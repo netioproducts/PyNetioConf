@@ -342,7 +342,7 @@ class ESPDevice(NETIODevice):
         encoded_data = json.dumps(data).encode("utf-8")
         esp_api.send_file(self, "/upload/config", encoded_data)
         self.logger.info(
-            f"Imported configuration from {file.name}, device {self.host} is restarting..."
+            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is restarting..."
         )
         sleep(kwargs.get("sleep_time", 15))
         username = kwargs.get("username", self.username)
@@ -395,7 +395,7 @@ class ESPDevice(NETIODevice):
             )
 
         self.logger.debug(
-            f"Uploaded firmware {file.name}, device {self.host} might be unresponsive for a while."
+            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive for a while."
         )
         sleep(pre_reconnect_wait)
 

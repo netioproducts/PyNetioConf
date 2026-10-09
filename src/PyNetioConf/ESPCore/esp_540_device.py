@@ -153,7 +153,13 @@ class ESP540Device(ESP520Device):
             self.session_id = self.login(username, password)
         # self.supported_features = self.get_features()
         # self.output_count: int = self.supported_features["outputCount"]
-        # self.user_permissions = self.get_current_user()["privileges"]
+        try:
+            self.user_permissions = self.get_user_privileges(username)
+        except (CommunicationError, ElementNotFound):
+            self.logger.warning(
+                f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
+            )
+        self._ka_thread: threading.Timer | None = None
         if keep_alive:
             self._ka_thread = threading.Timer(120, self._keep_alive)
             self._ka_thread.daemon = True
