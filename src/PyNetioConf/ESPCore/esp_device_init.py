@@ -8,7 +8,7 @@ import requests
 import websocket
 from websocket import WebSocket
 
-from ..exceptions import CommunicationError, InvalidParameterValueError
+from ..exceptions import AuthError, CommunicationError, InvalidParameterValueError
 from ..netio_device import NETIODevice
 from . import ws_api
 
@@ -222,6 +222,11 @@ def initialize_esp(
                     f"Websocket on {host} is connected but version couldn't be verified, defaulting to 5beta firmware"
                 )
                 version, minor, patch = 5, 0, 0
+    except AuthError:
+        # The device refused the credentials, it does have the WebSocket API, so no fallback to older firmware
+        if ws is not None:
+            ws.close()
+        raise
     except:
         ws_req_id = 0
         ws = None

@@ -17,7 +17,7 @@ from PyNetioConf.constants import (
     WS_RECONNECT_TIMEOUT,
 )
 
-from ..exceptions import CommunicationError
+from ..exceptions import AuthError, CommunicationError
 from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
@@ -182,6 +182,9 @@ def send_request(
             if ws_topic == "system/reset":
                 return {}
             continue
+        except AuthError:
+            # A refused login from reconnecting is not a communication problem, retrying can't fix the credentials
+            raise
         except Exception as e:
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
 
@@ -338,6 +341,20 @@ def generate_auth_token(password_token: tuple[str, str], local_timestamp: int) -
     return f"{password_token[0]}.{token_hash}"
 
 
+def _check_auth_reply(reply: dict[str, Any], host: str) -> None:
+    """
+    Raises AuthError when the device refused the login, with the error code the device sent, such as
+    InvalidCredentials or TooManyFailLogin. A reply without a status counts as a success, only firmware 5.4.0 is
+    checked to send one.
+    """
+    status = reply.get("status")
+    if status is not None and status != "OK":
+        error: dict[str, Any] = reply.get("error", {})
+        code = error.get("code", status)
+        message = str(error.get("message", "")).rstrip(" :")
+        raise AuthError(f"Login to {host} failed with {code}: {message}")
+
+
 def login(
     device: NETIODevice, timestamp: int, public_key: str, username: str, password: str
 ) -> dict[str, Any]:
@@ -365,7 +382,9 @@ def login(
     logger.debug(
         f"Received authentication response from {device.host}, payload: {message}"
     )
-    return json.loads(message)
+    reply: dict[str, Any] = json.loads(message)
+    _check_auth_reply(reply, device.host)
+    return reply
 
 
 def device_init_login(
@@ -392,7 +411,9 @@ def device_init_login(
     ws_req_id += 1
     message = ws.recv()
     logger.debug(f"Received authentication response from {host}, payload: {message}")
-    return json.loads(message)
+    reply: dict[str, Any] = json.loads(message)
+    _check_auth_reply(reply, host)
+    return reply
 
 
 def device_init_request(

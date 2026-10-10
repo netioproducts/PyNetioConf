@@ -35,6 +35,7 @@ from websocket import WebSocket
 from .. import NetioManager
 from ..constants import DEFAULT_KEEP_ALIVE_QUEUE_LEN, DEFAULT_REQUEST_QUEUE_LEN
 from ..exceptions import (
+    AuthError,
     CommunicationError,
     ElementNotFound,
     InvalidParameterValueError,
@@ -266,6 +267,12 @@ class ESP500Device(NETIODevice):
                 self.ws = None
                 sleep(1)
                 continue
+            except AuthError:
+                # Not retried, the credentials stay wrong and every attempt counts towards the device's lockout
+                if self.ws is not None:
+                    self.ws.close()
+                self.ws = None
+                raise
 
             if reconnected and self._keep_alive_flag:
                 self._ka_thread = threading.Timer(120, self._keep_alive)

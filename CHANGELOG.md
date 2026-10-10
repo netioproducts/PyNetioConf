@@ -63,6 +63,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `ws_api.send_request` reconnected without a limit when the connection kept dropping. It now keeps reconnecting for
   up to 60 seconds (`WS_RECONNECT_TIMEOUT`), starting a reconnect at most every 10 seconds (`WS_RECONNECT_INTERVAL`),
   and then raises `CommunicationError`.
+- On 5.x firmware, a wrong username or password went unnoticed: creating the device failed later with a `KeyError`,
+  and `login` reported success. A refused login now raises `AuthError` with the error code the device sent, such as
+  `InvalidCredentials`, or `TooManyFailLogin` while the device refuses logins after repeated failures. `login` doesn't
+  retry it, since every attempt counts towards that lockout. Code that caught `KeyError` for wrong credentials has to
+  catch `AuthError`.
 
 ## [0.3.0b1] - 2026-10-05
 
