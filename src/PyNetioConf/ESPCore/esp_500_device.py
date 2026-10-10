@@ -9,7 +9,7 @@ import ssl
 import sys
 from collections import deque
 from io import BytesIO
-from time import sleep
+from time import perf_counter, sleep
 from xml.etree.ElementTree import Element
 
 from PyNetioConf.constants import (
@@ -33,10 +33,17 @@ import websocket
 from websocket import WebSocket
 
 from .. import NetioManager
-from ..constants import DEFAULT_KEEP_ALIVE_QUEUE_LEN, DEFAULT_REQUEST_QUEUE_LEN
+from ..constants import (
+    DEFAULT_KEEP_ALIVE_QUEUE_LEN,
+    DEFAULT_REQUEST_QUEUE_LEN,
+    USER_LIST_SYNC_INTERVAL,
+    USER_LIST_SYNC_TIMEOUT,
+    USER_PRIVILEGES,
+)
 from ..exceptions import (
     AuthError,
     CommunicationError,
+    ElementAlreadyExists,
     ElementNotFound,
     InvalidParameterValueError,
     InvalidSocketIndex,
@@ -205,7 +212,9 @@ class ESP500Device(NETIODevice):
     @override
     def login(self, username: str, password: str, logout: bool = False) -> str:
         if logout:
-            self.ws = None  # Disables a connection if one was present, the device handles the logout automatically
+            # Drops the current connection, which usually ended with a device restart, and logs in on a new one
+            ws_api.close_connection(self.ws, graceful=False)
+            self.ws = None
 
         # Each attempt connects if needed, then sends HELO and AUTH. The AUTH token is built from the HELO reply, so a
         # dropped connection needs the whole sequence again. HELO doesn't go through send_request, which would call
@@ -264,13 +273,14 @@ class ESP500Device(NETIODevice):
                 self.logger.debug(
                     f"Login to {self.host} failed on {attempt + 1}/{try_count}"
                 )
+                # The next attempt opens a new connection, the device would keep a session for this one
+                ws_api.close_connection(self.ws, graceful=False)
                 self.ws = None
                 sleep(1)
                 continue
             except AuthError:
                 # Not retried, the credentials stay wrong and every attempt counts towards the device's lockout
-                if self.ws is not None:
-                    self.ws.close()
+                ws_api.close_connection(self.ws)
                 self.ws = None
                 raise
 
@@ -278,6 +288,20 @@ class ESP500Device(NETIODevice):
                 self._ka_thread = threading.Timer(120, self._keep_alive)
                 self._ka_thread.daemon = True
                 self._ka_thread.start()
+
+            # change_password and the logins after a dropped connection use the credentials of the last login
+            user_changed = username != self.username
+            self.username = username
+            self.password = password
+            if user_changed:
+                try:
+                    self.user_permissions = self.get_user_privileges(username)
+                except (CommunicationError, ElementNotFound):
+                    self.logger.warning(
+                        f"Couldn't read the privileges of user {username} on device {self.host}, "
+                        "user_permissions is empty."
+                    )
+                    self.user_permissions = []
 
             return "TODO: Authenticate Session ID on 5.x.x"
 
@@ -288,6 +312,12 @@ class ESP500Device(NETIODevice):
     @override
     def logout(self) -> None:
         self.logger.debug(f"Logging out of device {self.host}")
+        # The keep-alive would log in again and open a new session. The next login starts it again.
+        if self._ka_thread:
+            self._ka_thread.cancel()
+            self._ka_thread.join()
+        # The device keeps the session until the connection closes
+        ws_api.close_connection(self.ws)
         self.ws = None
         self.ws_req_id = 0
 
@@ -308,6 +338,7 @@ class ESP500Device(NETIODevice):
         )
         ws_type = "SUBSCRIBE"
         ws_topic = f"users/name/{username}/config"
+        self._require_user(username)
         response = ws_api.send_request(self, ws_type, ws_topic)
         data = response.get("data")
         if not data:
@@ -330,28 +361,16 @@ class ESP500Device(NETIODevice):
         self, username: str, password: str, privileges: list[str] | None = None
     ) -> None:
         self.logger.debug(f"Creating user {username} on device {self.host}")
+        if privileges is None or len(privileges) == 0:
+            privileges = ["can_login"]
+        privileges_dict = self._privileges_dict(privileges)
+        # The device replies OK to creating an existing user and leaves that user unchanged
+        if username in self.get_users():
+            raise ElementAlreadyExists(f"User {username} already exists on device {self.host}")
+
         hello_response = ws_api.send_request(self, "HELO")
         public_key = hello_response["data"]["publicKey"]
         password_hash = ws_api.generate_password_hash(username, password, public_key)
-
-        all_privileges = [
-            "can_alter_rules",
-            "can_alter_settings",
-            "can_alter_users",
-            "can_login",
-            "can_control_outputs",
-            "can_alter_outputs",
-            "can_view_settings",
-            "can_alter_devices",
-            "can_view_history",
-            "can_control_user_buttons",
-            "can_browse_logs",
-            "can_use_tunnels",
-        ]
-        if privileges is None or len(privileges) == 0:
-            privileges = ["can_login"]
-
-        privileges_dict = {key: (key in privileges) for key in all_privileges}
 
         ws_type = "SET"
         ws_topic = "users/create"
@@ -362,6 +381,7 @@ class ESP500Device(NETIODevice):
             "privileges": privileges_dict,
         }
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self._wait_for_user_list(username, listed=True)
 
     @override
     def remove_user(self, username: str) -> None:
@@ -369,7 +389,40 @@ class ESP500Device(NETIODevice):
         ws_type = "SET"
         ws_topic = "users/delete"
         ws_data = {"name": username}
+        # The device replies OK to deleting a user that doesn't exist
+        self._require_user(username)
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self._wait_for_user_list(username, listed=False)
+
+    @override
+    def set_user_privileges(self, username: str, privileges: list[str]) -> None:
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"users/name/{username}/config"
+        self.logger.debug(f"Setting privileges of user {username} on device {self.host}")
+        privileges_dict = self._privileges_dict(privileges)
+        self._require_user(username)
+        ws_data = self._require_config(
+            ws_api.send_request(self, ws_type, ws_topic).get("data", {}),
+            f"user {username}",
+        )
+        ws_data["privileges"] = privileges_dict
+        ws_type = "SET"
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def set_user_privilege(self, username: str, privilege: str, state: bool) -> None:
+        ws_type = "SUBSCRIBE"
+        ws_topic = f"users/name/{username}/config"
+        self.logger.debug(f"Setting privilege {privilege} of user {username} to {state} on device {self.host}")
+        self._check_privileges([privilege])
+        self._require_user(username)
+        ws_data = self._require_config(
+            ws_api.send_request(self, ws_type, ws_topic).get("data", {}),
+            f"user {username}",
+        )
+        ws_data["privileges"][privilege] = state
+        ws_type = "SET"
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def get_system_info(self) -> dict[str, Any]:
@@ -436,6 +489,47 @@ class ESP500Device(NETIODevice):
             "scheduleId": _value_or_current(schedule_id, current, "scheduleId"),
         }
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    def _require_user(self, username: str) -> None:
+        """
+        Raises ElementNotFound when the user is not on the device. The check goes through users/list, because
+        requesting the config of a user that doesn't exist restarts firmware 5.4.0. The logged-in user is not
+        checked.
+        """
+        if username != self.username and username not in self.get_users():
+            raise ElementNotFound(f"User {username} not found on device {self.host}")
+
+    def _wait_for_user_list(self, username: str, listed: bool) -> None:
+        """
+        Waits until users/list shows the user as listed or not listed. The device confirms users/create and
+        users/delete before users/list shows the change, so checks right after them would see the old state.
+        """
+        deadline = perf_counter() + USER_LIST_SYNC_TIMEOUT
+        while (username in self.get_users()) != listed:
+            if perf_counter() >= deadline:
+                state = "still not listed" if listed else "still listed"
+                raise CommunicationError(
+                    f"User {username} is {state} on device {self.host} {USER_LIST_SYNC_TIMEOUT} seconds after "
+                    "the device confirmed the change"
+                )
+            sleep(USER_LIST_SYNC_INTERVAL)
+
+    def _check_privileges(self, privileges: list[str]) -> None:
+        """
+        Raises InvalidParameterValueError when one of the privileges doesn't exist.
+        """
+        unknown = [privilege for privilege in privileges if privilege not in USER_PRIVILEGES]
+        if unknown:
+            raise InvalidParameterValueError(
+                f"Unknown privileges {unknown}, the possible ones are {list(USER_PRIVILEGES)}"
+            )
+
+    def _privileges_dict(self, privileges: list[str]) -> dict[str, bool]:
+        """
+        Turns a list of privileges into the dict the device expects, with every privilege in it.
+        """
+        self._check_privileges(privileges)
+        return {privilege: privilege in privileges for privilege in USER_PRIVILEGES}
 
     def _require_config(
         self, current: dict[str, Any], config_name: str
@@ -1587,6 +1681,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(
             f"Changing password for user {username} on device {self.host}"
         )
+        self._require_user(username)
         user_cfg_res = ws_api.send_request(self, ws_type, ws_topic)
         user_data = user_cfg_res["data"]
         hello_response = ws_api.send_request(self, "HELO")
@@ -1599,6 +1694,9 @@ class ESP500Device(NETIODevice):
 
         ws_type = "SET"
         ws_api.send_request(self, ws_type, ws_topic, user_data)
+        # Logins after a dropped connection have to use the new password
+        if username == self.username:
+            self.password = new_password
 
     @override
     def change_password(self, new_password: str) -> None:
@@ -1664,7 +1762,8 @@ class ESP500Device(NETIODevice):
                 self.logger.debug("Disabled keep-alive thread.")
         except AttributeError:
             pass  # No need to clean up a non existant thread
-        # TODO: Logout to be sure here even though destroying the connection should be sufficient
+        # Shut down without waiting for the device's reply, so exiting isn't held up by a device that stopped answering
+        ws_api.close_connection(self.ws, graceful=False)
         self.ws = None
 
     @override

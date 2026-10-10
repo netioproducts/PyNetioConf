@@ -219,6 +219,31 @@ def _reconnect(device: NETIODevice, deadline: float, last_attempt: float | None)
             logger.debug(f"Reconnecting to {device.host} failed, retrying.")
 
 
+def close_connection(ws: WebSocket | None, graceful: bool = True) -> None:
+    """
+    Closes a WebSocket connection to a device. The device keeps a session for every open connection and has room for
+    only a few, so a connection that isn't needed any more has to be closed, not left to the garbage collector.
+
+    Parameters
+    ----------
+    ws : WebSocket | None
+        The connection to close. None does nothing.
+    graceful : bool
+        Send a close frame and wait for the device's reply. Otherwise the socket is shut down at once, which is meant
+        for a connection that dropped or stopped answering. Default True.
+    """
+    if ws is None:
+        return
+    try:
+        if graceful:
+            ws.close()
+        else:
+            ws.shutdown()
+    except Exception as e:
+        # A connection that can't be closed cleanly has already dropped, the device ends its session either way
+        logger.debug(f"Closing a WebSocket connection failed, dropping it: {e}")
+
+
 def _gen_file_chunks(
     file_obj: BufferedIOBase, chunk_size: int = 2048
 ) -> Generator[_FileChunk, None, None]:

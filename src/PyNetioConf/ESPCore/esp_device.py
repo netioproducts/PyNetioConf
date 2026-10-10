@@ -86,6 +86,12 @@ class ESPDevice(NETIODevice):
             )
         else:
             raise CommunicationError("Cannot login to device")
+        # change_password and later logins use the credentials of the last login
+        user_changed = username != self.username
+        self.username = username
+        self.password = password
+        if user_changed:
+            self.user_permissions = self.get_current_user()["privileges"]
         return self.session_id
 
     def logout(self) -> None:
@@ -508,9 +514,8 @@ class ESPDevice(NETIODevice):
         self.logger.debug(
             f"Checking for user privileges of user {username} on device {self.host}"
         )
-        for user in device_users:
-            if user["username"] == username:
-                return user["permissions"]
+        if username in device_users:
+            return device_users[username]["permissions"]
         self.logger.info(
             f"Couldn't find the specified user {username} in the user list."
         )
@@ -518,10 +523,12 @@ class ESPDevice(NETIODevice):
 
     def get_users(self) -> dict[str, Any]:
         action = "getUserList"
-        return esp_api.send_request(self, action).json()["data"]
+        self.logger.debug(f"Fetching users list on device {self.host}")
+        users = esp_api.send_request(self, action).json()["data"]
+        return {user["username"]: user for user in users}
 
     def change_password(self, new_password: str) -> None:
-        self.change_user_password(new_password, self.username, self.password)
+        self.change_user_password(self.username, self.password, new_password)
 
     def change_user_password(
         self,
@@ -538,9 +545,7 @@ class ESPDevice(NETIODevice):
             "username": username,
             "password": {"old": old_password, "new": new_password},
         }
-        self.logger.debug(
-            f"Changing password of user {username} to {new_password} on device {self.host}"
-        )
+        self.logger.debug(f"Changing password of user {username} on device {self.host}")
         esp_api.send_request(self, "setUser", request_data)
         if username == current_user["data"]["username"]:
             self.password = new_password
@@ -584,6 +589,12 @@ class ESPDevice(NETIODevice):
         action = "deleteUser"
         self.logger.debug(f"Removing user {username} on device {self.host}")
         esp_api.send_request(self, action, requst_data)
+
+    def set_user_privileges(self, username: str, privileges: list[str]) -> None:
+        raise NotImplementedError("set_user_privileges is not implemented for legacy ESP devices")
+
+    def set_user_privilege(self, username: str, privilege: str, state: bool) -> None:
+        raise NotImplementedError("set_user_privilege is not implemented for legacy ESP devices")
 
         # endregion
 

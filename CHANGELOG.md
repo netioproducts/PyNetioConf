@@ -13,6 +13,12 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   the library sends `GET` requests where older 5.x firmware uses `SUBSCRIBE`.
 - 5.x devices record their firmware version in `version` as `(major, minor, patch)`.
 - Python 3.15 support, including the 3.15 classifier and the release workflow's import test.
+- `set_user_privileges(username, privileges)` replaces the privileges of an existing user on 5.x firmware. On
+  2.x.x-4.x.x devices and the 5.0.x beta it raises `NotImplementedError`.
+- `set_user_privilege(username, privilege, state)` grants or takes away one privilege of an existing user on 5.x
+  firmware and leaves the others as they are. On 2.x.x-4.x.x devices and the 5.0.x beta it raises
+  `NotImplementedError`.
+- `constants.USER_PRIVILEGES` lists the privileges a user can have on 5.x firmware.
 
 ### Changed
 
@@ -27,6 +33,16 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - Documented every `__init__` parameter and keyword argument of the 5.x device classes, corrected the firmware
   versions in their class docstrings, and corrected the keep-alive interval in `NetioManager.init_device` to 120
   seconds.
+- On 5.x firmware, `create_user` raises `InvalidParameterValueError` for privileges the device doesn't know, which it
+  used to drop without a word, and `ElementAlreadyExists` for a username that is taken, where the device used to
+  keep the existing user unchanged and report success. `remove_user` raises `ElementNotFound` for a user that doesn't
+  exist. Code that relied on these calls passing has to handle the exceptions.
+- On 5.x firmware, `create_user` and `remove_user` return once `get_users()` shows the change, which the device can
+  take a moment to do. They check every 0.5 seconds for up to 3 seconds (`USER_LIST_SYNC_INTERVAL`,
+  `USER_LIST_SYNC_TIMEOUT`) and then raise `CommunicationError`. The user management methods also send one more
+  `users/list` request to check that the user exists.
+- On 2.x.x-4.x.x devices and the 5.0.x beta, `get_users` returns a dictionary keyed by username, as documented and as
+  on 5.x firmware, instead of the device's list of users. Code that iterated the list has to iterate `.values()`.
 
 ### Fixed
 
@@ -68,6 +84,27 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `InvalidCredentials`, or `TooManyFailLogin` while the device refuses logins after repeated failures. `login` doesn't
   retry it, since every attempt counts towards that lockout. Code that caught `KeyError` for wrong credentials has to
   catch `AuthError`.
+- On 5.x firmware, `get_user_privileges` and `change_user_password` for a user that doesn't exist raise
+  `ElementNotFound`. They used to request that user's config, which made firmware 5.4.0 restart, and failed after a
+  minute with `CommunicationError`.
+- On 5.x firmware, `change_password`, and `change_user_password` for the logged-in user, also change the password the
+  device object logs in with, so logging in again after a dropped connection no longer fails with `AuthError`.
+- Corrected the docstrings of the user management methods: the privileges `create_user` accepts, what `get_users`
+  returns, which privilege changing a password needs, and that 5.x firmware doesn't use `old_password`.
+- On 2.x.x-4.x.x devices and the 5.0.x beta, `change_password` passed its arguments to `change_user_password` in the
+  wrong order, so it sent the new password as the username and the current password as the new one.
+- On 2.x.x-4.x.x devices and the 5.0.x beta, `change_user_password` no longer writes the new password into its debug
+  log message.
+- `login` with other credentials than the device object had kept the old `username`, `password` and
+  `user_permissions`. `change_password` then changed the previous user's password, and the logins after a dropped
+  connection went back to the previous user. `login` now keeps the credentials of a successful login and, when the
+  user changes, reads the new user's privileges into `user_permissions`.
+- On 5.x firmware, `logout` now closes the WebSocket connection and stops the keep-alive. It used to only drop the
+  connection, so the device kept the session open until Python's garbage collector closed the socket, and on 5.2.x and
+  newer the keep-alive logged in again on a new connection within 120 seconds. The device has room for only a few
+  sessions, and firmware 5.4.0 restarts when a new connection finds them all taken. The connections left behind by
+  failed login attempts, reconnects, device objects that failed to initialize and the exit of the program are closed as
+  well.
 
 ## [0.3.0b1] - 2026-10-05
 

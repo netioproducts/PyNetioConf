@@ -69,6 +69,10 @@ class NETIODevice(ABC):
         """
         Login to the device, generating a session ID to be used for the requests across the session.
 
+        After a successful login the device object keeps username and password, which change_password() and the
+        logins after a dropped connection use. When the user is a different one than before, user_permissions is
+        read again for the new user.
+
         Parameters
         ----------
         username: str
@@ -84,11 +88,8 @@ class NETIODevice(ABC):
     @abstractmethod
     def logout(self) -> None:
         """
-        Log out of the device, clearing the session.
-
-        Returns
-        -------
-            The response of the request.
+        Log out of the device, ending the session. On 5.x firmware this closes the WebSocket connection, so the device
+        frees the session at once, and stops the keep-alive. A request sent after logging out logs in again.
         """
         pass
 
@@ -607,10 +608,12 @@ class NETIODevice(ABC):
     @abstractmethod
     def get_users(self) -> dict[str, Any]:
         """
-        Gets the users and their details.
+        Gets the users on the device.
+
         Returns
         -------
-            A dictionary containing the user information and thir priviledges.
+            A dictionary keyed by username. On 5.x firmware the values only hold the name, use
+            get_user_privileges() for a user's privileges.
         """
         pass
 
@@ -627,13 +630,19 @@ class NETIODevice(ABC):
         Returns
         -------
             A list of string priviledges associated with the specified user.
+
+        Raises
+        ------
+        ElementNotFound
+            The user doesn't exist on the device.
         """
         pass
 
     @abstractmethod
     def change_password(self, new_password: str) -> None:
         """
-        Change the password of the currently logged-in user. Requires you to be logged in as administrator.
+        Changes the password of the logged-in user, and the password the device object uses to log in again
+        after a dropped connection. On 5.x firmware the user needs the can_alter_users privilege.
 
         Parameters
         ----------
@@ -647,16 +656,23 @@ class NETIODevice(ABC):
         self, username: str, old_password: str, new_password: str
     ) -> None:
         """
-        Change the administrator password. Requires you to be logged in as administrator.
+        Changes the password of a user. Requires the can_alter_users privilege. When the user is the logged-in one,
+        the password the device object uses to log in again is changed as well.
 
         Parameters
         ----------
         username: str
             The username of the account you want to change the password for.
         old_password: str
-            The current password of the account.
+            The current password of the account. Firmware 2.x-4.x needs it, 5.x firmware doesn't ask for it and it
+            is not used there.
         new_password: str
             The desired password for the account.
+
+        Raises
+        ------
+        ElementNotFound
+            The user doesn't exist on the device (5.x firmware).
         """
         pass
 
@@ -674,10 +690,19 @@ class NETIODevice(ABC):
         password : str
             The password for the account.
         privileges : List[str]
-            List of privileges required to create the account.
-            An empty list means no privileges, the user can only observe. (or more precisely a log-in priviledge gets added automatically)
-            Possible privileges include: ["can_login","can_alter_users","can_alter_settings","can_use_tunnels",
-            "can_browse_logs","can_alter_outputs","can_control_outputs","can_view_settings","can_alter_rules"]
+            The privileges of the new user. None or an empty list gives the user only can_login.
+            On 5.x firmware the possible privileges are the ones in constants.USER_PRIVILEGES: "can_alter_rules",
+            "can_alter_settings", "can_alter_users", "can_login", "can_control_outputs", "can_alter_outputs",
+            "can_view_settings", "can_alter_devices", "can_view_history", "can_control_user_buttons",
+            "can_browse_logs" and "can_use_tunnels". On firmware 2.x-4.x the library accepts the same ones without
+            can_alter_devices, can_view_history and can_control_user_buttons.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            A privilege is not one of the possible ones (5.x firmware, 2.x-4.x raise ValueError).
+        ElementAlreadyExists
+            A user with this username already exists (5.x firmware).
         """
         pass
 
@@ -690,9 +715,57 @@ class NETIODevice(ABC):
         ----------
         username : str
             The username of the account you want to remove.
-        Returns
-        -------
 
+        Raises
+        ------
+        ElementNotFound
+            The user doesn't exist on the device (5.x firmware).
+        """
+        pass
+
+    @abstractmethod
+    def set_user_privileges(self, username: str, privileges: list[str]) -> None:
+        """
+        Replaces the privileges of an existing user. Requires the can_alter_users privilege.
+
+        Parameters
+        ----------
+        username : str
+            The username of the account whose privileges you want to change.
+        privileges : List[str]
+            The complete new list of privileges, see create_user() for the possible ones. Privileges that are not
+            in the list are taken away, so an empty list leaves the user without any, including can_login.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            A privilege is not one of the possible ones.
+        ElementNotFound
+            The user doesn't exist on the device.
+        """
+        pass
+
+    @abstractmethod
+    def set_user_privilege(self, username: str, privilege: str, state: bool) -> None:
+        """
+        Grants or takes away one privilege of an existing user and leaves the others as they are. Requires the
+        can_alter_users privilege.
+
+        Parameters
+        ----------
+        username : str
+            The username of the account whose privilege you want to change.
+        privilege : str
+            The privilege to change, see create_user() for the possible ones.
+        state : bool
+            True grants the privilege, False takes it away.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The privilege is not one of the possible ones.
+        ElementNotFound
+            The user doesn't exist on the device.
         """
         pass
 

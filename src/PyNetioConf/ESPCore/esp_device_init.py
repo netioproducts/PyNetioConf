@@ -224,10 +224,11 @@ def initialize_esp(
                 version, minor, patch = 5, 0, 0
     except AuthError:
         # The device refused the credentials, it does have the WebSocket API, so no fallback to older firmware
-        if ws is not None:
-            ws.close()
+        ws_api.close_connection(ws)
         raise
     except:
+        # A connection that was opened is closed, so the device doesn't keep a session for it
+        ws_api.close_connection(ws, graceful=False)
         ws_req_id = 0
         ws = None
 
@@ -277,81 +278,89 @@ def initialize_esp(
         return netio_device
 
     if int(version) == 5:
-        if int(minor) >= 4:
-            from .esp_540_device import ESP540Device
+        try:
+            if int(minor) >= 4:
+                from .esp_540_device import ESP540Device
 
-            netio_device = ESP540Device(
-                host,
-                username,
-                password,
-                "",
-                "",
-                keep_alive,
-                netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-                use_https,
-                ws_connection=ws,
-                ws_req_id=ws_req_id,
-                is_ws_auth=True if ws is not None else False,
-                ws_helo_data=hello_response,
-                device_version=(int(version), int(minor), int(patch)),
-                ssl_options=ssl_options,
-            )
-            return netio_device
-        elif int(minor) >= 2:
-            from .esp_520_device import ESP520Device
+                netio_device = ESP540Device(
+                    host,
+                    username,
+                    password,
+                    "",
+                    "",
+                    keep_alive,
+                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    use_https,
+                    ws_connection=ws,
+                    ws_req_id=ws_req_id,
+                    is_ws_auth=True if ws is not None else False,
+                    ws_helo_data=hello_response,
+                    device_version=(int(version), int(minor), int(patch)),
+                    ssl_options=ssl_options,
+                )
+                return netio_device
+            elif int(minor) >= 2:
+                from .esp_520_device import ESP520Device
 
-            netio_device = ESP520Device(
-                host,
-                username,
-                password,
-                "",
-                "",
-                keep_alive,
-                netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-                use_https,
-                ws_connection=ws,
-                ws_req_id=ws_req_id,
-                is_ws_auth=True if ws is not None else False,
-                ws_helo_data=hello_response,
-                device_version=(int(version), int(minor), int(patch)),
-                ssl_options=ssl_options,
-            )
-            return netio_device
-        elif int(minor) == 1:
-            from .esp_500_device import ESP500Device
+                netio_device = ESP520Device(
+                    host,
+                    username,
+                    password,
+                    "",
+                    "",
+                    keep_alive,
+                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    use_https,
+                    ws_connection=ws,
+                    ws_req_id=ws_req_id,
+                    is_ws_auth=True if ws is not None else False,
+                    ws_helo_data=hello_response,
+                    device_version=(int(version), int(minor), int(patch)),
+                    ssl_options=ssl_options,
+                )
+                return netio_device
+            elif int(minor) == 1:
+                from .esp_500_device import ESP500Device
 
-            netio_device = ESP500Device(
-                host,
-                username,
-                password,
-                "",
-                "",
-                keep_alive,
-                netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-                use_https,
-                ws_connection=ws,
-                ws_req_id=ws_req_id,
-                is_ws_auth=True if ws is not None else False,
-                ws_helo_data=hello_response,
-                device_version=(int(version), int(minor), int(patch)),
-                ssl_options=ssl_options,
-            )
-            return netio_device
-        else:
-            from .esp_5beta_device import ESP5BetaDevice
+                netio_device = ESP500Device(
+                    host,
+                    username,
+                    password,
+                    "",
+                    "",
+                    keep_alive,
+                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    use_https,
+                    ws_connection=ws,
+                    ws_req_id=ws_req_id,
+                    is_ws_auth=True if ws is not None else False,
+                    ws_helo_data=hello_response,
+                    device_version=(int(version), int(minor), int(patch)),
+                    ssl_options=ssl_options,
+                )
+                return netio_device
+            else:
+                from .esp_5beta_device import ESP5BetaDevice
 
-            ws = None
-            netio_device = ESP5BetaDevice(
-                host,
-                username,
-                password,
-                "",
-                "",
-                keep_alive,
-                netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-                use_https,
-            )
-            return netio_device
+                # ESP5BetaDevice opens a connection of its own
+                ws_api.close_connection(ws)
+                ws = None
+                netio_device = ESP5BetaDevice(
+                    host,
+                    username,
+                    password,
+                    "",
+                    "",
+                    keep_alive,
+                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    use_https,
+                )
+                return netio_device
+        except BaseException:
+            # A device object that failed to initialize didn't take the connection over, close it so the device
+            # doesn't keep a session for it
+            ws_api.close_connection(ws, graceful=False)
+            raise
 
     raise InvalidParameterValueError(
         f"There is no firmware with major version {version} supported"
