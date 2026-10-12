@@ -8,6 +8,7 @@ import os
 import ssl
 import sys
 from collections import deque
+from enum import StrEnum
 from io import BytesIO
 from time import perf_counter, sleep
 from xml.etree.ElementTree import Element
@@ -45,7 +46,12 @@ from ..constants import (
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
     USER_PRIVILEGES,
+    NetworkMode,
     OutputAction,
+    PushProtocol,
+    SnmpAuthProtocol,
+    SnmpPrivProtocol,
+    SnmpSecurityLevel,
 )
 from ..exceptions import (
     AuthError,
@@ -63,6 +69,18 @@ from .esp_400_device import ESP400Device
 def _value_or_current(value: Any, current: dict[str, Any], key: str) -> Any:
     """Returns value, or the device's current value for key when value is None."""
     return value if value is not None else current[key]
+
+
+def _choice_value(choices: type[StrEnum], value: str | None, name: str) -> str | None:
+    """Returns the plain string of a choice given as a member of choices or as its value, None stays None."""
+    if value is None:
+        return None
+    try:
+        return choices(value).value
+    except ValueError:
+        raise InvalidParameterValueError(
+            f"Unknown {name} {value!r}, the possible ones are {[choice.value for choice in choices]}"
+        ) from None
 
 
 def _auth_or_current(
@@ -1154,7 +1172,7 @@ class ESP500Device(NETIODevice):
         self,
         protocol_enabled: bool | None = None,
         url: str | None = None,
-        push_protocol: str | None = None,
+        push_protocol: PushProtocol | str | None = None,
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
@@ -1162,10 +1180,8 @@ class ESP500Device(NETIODevice):
         ws_topic = "protocols/push/config"
 
         self.logger.debug(f"Setting Netio Push API state on device {self.host}")
-        if push_protocol is not None and push_protocol.upper() not in ("JSON", "XML"):
-            raise InvalidParameterValueError(
-                f"push_protocol must be 'json' or 'xml', got {push_protocol!r}"
-            )
+        if push_protocol is not None:
+            push_protocol = _choice_value(PushProtocol, push_protocol.upper(), "push_protocol")
         current = self._require_config(
             self.get_netio_push_api_state(), "Netio Push API"
         )
@@ -1177,7 +1193,7 @@ class ESP500Device(NETIODevice):
         }
         # The device doesn't report the push format, so only send it when given.
         if push_protocol is not None:
-            protocol_data["protocol"] = push_protocol.upper()
+            protocol_data["protocol"] = push_protocol
         _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     @override
@@ -1255,10 +1271,10 @@ class ESP500Device(NETIODevice):
         protocol_enabled: bool | None = None,
         location: str | None = None,
         security_name: str | None = None,
-        security_level: str | None = None,
-        auth_protocol: str | None = None,
+        security_level: SnmpSecurityLevel | str | None = None,
+        auth_protocol: SnmpAuthProtocol | str | None = None,
         auth_key: str | None = None,
-        priv_protocol: str | None = None,
+        priv_protocol: SnmpPrivProtocol | str | None = None,
         priv_key: str | None = None,
     ) -> None:
         self.logger.debug(f"Setting SNMP v3 API state on device {self.host}")
@@ -1267,10 +1283,10 @@ class ESP500Device(NETIODevice):
             version="v3",
             location=location,
             security_name=security_name,
-            security_level=security_level,
-            auth_protocol=auth_protocol,
+            security_level=_choice_value(SnmpSecurityLevel, security_level, "security_level"),
+            auth_protocol=_choice_value(SnmpAuthProtocol, auth_protocol, "auth_protocol"),
             auth_key=auth_key,
-            priv_protocol=priv_protocol,
+            priv_protocol=_choice_value(SnmpPrivProtocol, priv_protocol, "priv_protocol"),
             priv_key=priv_key,
         )
 
@@ -1950,7 +1966,7 @@ class ESP500Device(NETIODevice):
     @override
     def set_ethernet_settings(
         self,
-        network_mode: str | None = None,
+        network_mode: NetworkMode | str | None = None,
         ip: str | None = None,
         netmask: str | None = None,
         gateway: str | None = None,
@@ -1960,6 +1976,7 @@ class ESP500Device(NETIODevice):
         ws_topic = "network/ethernet/config"
 
         self.logger.debug(f"Setting Ethernet configuration on device {self.host}")
+        network_mode = _choice_value(NetworkMode, network_mode, "network_mode")
         current = self._require_config(self.get_ethernet_settings(), "Ethernet")
         if (
             network_mode == "static"

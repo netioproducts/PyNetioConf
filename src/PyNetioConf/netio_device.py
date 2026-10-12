@@ -10,7 +10,14 @@ from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
 
-from .constants import OutputAction
+from .constants import (
+    NetworkMode,
+    OutputAction,
+    PushProtocol,
+    SnmpAuthProtocol,
+    SnmpPrivProtocol,
+    SnmpSecurityLevel,
+)
 
 # from .NetioManager import NetioManager
 
@@ -1145,7 +1152,7 @@ class NETIODevice(ABC):
         self,
         protocol_enabled: bool | None = None,
         url: str | None = None,
-        push_protocol: str | None = None,
+        push_protocol: PushProtocol | str | None = None,
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
@@ -1158,9 +1165,9 @@ class NETIODevice(ABC):
             Whether the protocol should be enabled or disabled. If None, keeps the setting already set on the device.
         url : str
             On what URL should the protocol push its messages. If None, keeps the setting already set on the device.
-        push_protocol : str
-            Which format should the push protocol use. Can be either 'json' or 'xml'. If None, the format is not sent
-            and the device keeps its current one.
+        push_protocol : PushProtocol | str
+            Which format should the push protocol use, PushProtocol.JSON or XML, or the name in lower or upper case.
+            If None, the format is not sent and the device keeps its current one.
         delta : int
             The current delta for auto push. If None, keeps the setting already set on the device.
         period : int
@@ -1234,10 +1241,10 @@ class NETIODevice(ABC):
         protocol_enabled: bool | None = None,
         location: str | None = None,
         security_name: str | None = None,
-        security_level: str | None = None,
-        auth_protocol: str | None = None,
+        security_level: SnmpSecurityLevel | str | None = None,
+        auth_protocol: SnmpAuthProtocol | str | None = None,
         auth_key: str | None = None,
-        priv_protocol: str | None = None,
+        priv_protocol: SnmpPrivProtocol | str | None = None,
         priv_key: str | None = None,
     ) -> None:
         """
@@ -1252,17 +1259,17 @@ class NETIODevice(ABC):
             The location of the SNMP v3 protocol, if None, keeps the setting already set on the device.
         security_name : str
             The security name of the SNMP v3 protocol, if None, keeps the setting already set on the device.
-        security_level : str
-            The security level of the SNMP v3, any of ["authPriv", "authNoPriv", "noAuthNoPriv"], if None,
-            keeps the setting already set on the device.
-        auth_protocol : str
-            The authentication protocol of the SNMP v3, if None, keeps the setting already set on the device. If the
-            security level is "noAuthNoPriv" this setting will not be set.
+        security_level : SnmpSecurityLevel | str
+            The security level of the SNMP v3, SnmpSecurityLevel.AUTH_PRIV, AUTH_NO_PRIV or NO_AUTH_NO_PRIV
+            ("authPriv", "authNoPriv" or "noAuthNoPriv"), if None, keeps the setting already set on the device.
+        auth_protocol : SnmpAuthProtocol | str
+            The authentication protocol of the SNMP v3, SnmpAuthProtocol.MD5 or SHA, if None, keeps the setting
+            already set on the device. If the security level is "noAuthNoPriv" this setting will not be set.
         auth_key : str
             The authentication key of the SNMP v3, if None, keeps the setting already set on the device. If the security
             level is "noAuthNoPriv" this setting will not be set.
-        priv_protocol : str
-            The private protocol of the SNMP v3, currently supports "AES" only, if None, keeps the setting already
+        priv_protocol : SnmpPrivProtocol | str
+            The private protocol of the SNMP v3, SnmpPrivProtocol.AES or DES, if None, keeps the setting already
             set on the device. If the security level is "noAuthNoPriv" or "authNoPriv" this setting will not be set.
         priv_key : str
             The private key of the SNMP v3, if None, keeps the setting already set on the device. If the security
@@ -1784,7 +1791,7 @@ class NETIODevice(ABC):
     @abstractmethod
     def set_ethernet_settings(
         self,
-        network_mode: str | None = None,
+        network_mode: NetworkMode | str | None = None,
         ip: str | None = None,
         netmask: str | None = None,
         gateway: str | None = None,
@@ -1797,8 +1804,8 @@ class NETIODevice(ABC):
 
         Parameters
         ----------
-        network_mode: str | None
-            Either "dhcp" or "static".
+        network_mode: NetworkMode | str | None
+            NetworkMode.DHCP or STATIC, or "dhcp" or "static".
         ip: str | None
             The IPv4 address the device should use.
         netmask: str | None

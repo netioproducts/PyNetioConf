@@ -34,6 +34,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   and raises `NotImplementedError` for the others, like `short_on_output` and `toggle_output` do there.
 - `set_output_reset_delay(output_id, reset_delay)` sets an output's reset delay in milliseconds on 5.x firmware. On
   2.x.x-4.x.x devices and the 5.0.x beta it raises `NotImplementedError`.
+- Enums in `constants` for the settings that take one of a few strings: `NetworkMode` for `set_ethernet_settings`,
+  `PushProtocol` for `set_netio_push_api_state`, and `SnmpSecurityLevel`, `SnmpAuthProtocol` and `SnmpPrivProtocol`
+  for `set_snmp_v3_api_state`. They are `StrEnum`s, so the plain strings keep working.
 
 ### Changed
 
@@ -58,6 +61,14 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `users/list` request to check that the user exists.
 - On 2.x.x-4.x.x devices and the 5.0.x beta, `get_users` returns a dictionary keyed by username, as documented and as
   on 5.x firmware, instead of the device's list of users. Code that iterated the list has to iterate `.values()`.
+- On 5.x firmware, `set_ethernet_settings` and `set_snmp_v3_api_state` raise `InvalidParameterValueError` for a
+  `network_mode`, `security_level`, `auth_protocol` or `priv_protocol` the device doesn't know, before sending
+  anything, instead of sending it to the device. `set_netio_push_api_state` already did that for `push_protocol`.
+
+### Removed
+
+- Support for Python 3.10, which reached its end of life in October 2026. PyNetioConf now needs Python 3.11 or newer.
+  On Python 3.10, pip and uv keep installing 0.3.0b1.
 
 ### Fixed
 

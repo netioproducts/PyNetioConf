@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import StrEnum
 
 # Timings and timeouts
 WS_EXECUTION_DELAY = 0.035  # Serves to give breathing room to the internal device timers and reduce unwanted restarts
@@ -31,8 +31,7 @@ DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive
 
 
-# Not StrEnum, which needs Python 3.11, PyNetioConf supports 3.10
-class OutputAction(str, Enum):  # noqa: UP042
+class OutputAction(StrEnum):
     """
     What set_output_action() does to an output. The values are the requests firmware 5.x takes. The short actions last
     the output's reset delay (resetDelay in get_output_data(), set with set_output_reset_delay()).
@@ -43,6 +42,43 @@ class OutputAction(str, Enum):  # noqa: UP042
     SHORT_ON = "son"  # On for the reset delay, then off
     SHORT_OFF = "soff"  # Off for the reset delay, then on
     TOGGLE = "toggle"
+
+
+# The choices of the protocol and network setters. The setters take the plain strings as well, the members are strings.
+class NetworkMode(StrEnum):
+    """How set_ethernet_settings() gets the device's address."""
+
+    DHCP = "dhcp"
+    STATIC = "static"
+
+
+class PushProtocol(StrEnum):
+    """The format of the Netio Push messages, set_netio_push_api_state() takes the lower case names as well."""
+
+    JSON = "JSON"
+    XML = "XML"
+
+
+class SnmpSecurityLevel(StrEnum):
+    """The SNMP v3 security level, set_snmp_v3_api_state()."""
+
+    AUTH_PRIV = "authPriv"  # Authentication and encryption
+    AUTH_NO_PRIV = "authNoPriv"  # Authentication only
+    NO_AUTH_NO_PRIV = "noAuthNoPriv"  # Neither
+
+
+class SnmpAuthProtocol(StrEnum):
+    """The SNMP v3 authentication algorithm, set_snmp_v3_api_state()."""
+
+    MD5 = "MD5"
+    SHA = "SHA"
+
+
+class SnmpPrivProtocol(StrEnum):
+    """The SNMP v3 encryption algorithm, set_snmp_v3_api_state()."""
+
+    AES = "AES"
+    DES = "DES"
 
 
 # Privileges a user can have on 5.0.0+ firmware, the device expects every one of them in a user's config

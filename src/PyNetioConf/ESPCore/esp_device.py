@@ -19,7 +19,14 @@ from xml.etree import ElementTree as ET
 
 import requests
 
-from ..constants import OutputAction
+from ..constants import (
+    NetworkMode,
+    OutputAction,
+    PushProtocol,
+    SnmpAuthProtocol,
+    SnmpPrivProtocol,
+    SnmpSecurityLevel,
+)
 from ..exceptions import (
     CommunicationError,
     ElementNotFound,
@@ -921,7 +928,7 @@ class ESPDevice(NETIODevice):
         self,
         protocol_enabled: bool | None = None,
         url: str | None = None,
-        push_protocol: str | None = None,
+        push_protocol: PushProtocol | str | None = None,
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
@@ -1086,10 +1093,10 @@ class ESPDevice(NETIODevice):
         protocol_enabled: bool | None = None,
         location: str | None = None,
         security_name: str | None = None,
-        security_level: str | None = None,
-        auth_protocol: str | None = None,
+        security_level: SnmpSecurityLevel | str | None = None,
+        auth_protocol: SnmpAuthProtocol | str | None = None,
         auth_key: str | None = None,
-        priv_protocol: str | None = None,
+        priv_protocol: SnmpPrivProtocol | str | None = None,
         priv_key: str | None = None,
     ) -> None:
         self._require_arguments(
@@ -1488,7 +1495,7 @@ class ESPDevice(NETIODevice):
     @override
     def set_ethernet_settings(
         self,
-        network_mode: str | None = None,
+        network_mode: NetworkMode | str | None = None,
         ip: str | None = None,
         netmask: str | None = None,
         gateway: str | None = None,
