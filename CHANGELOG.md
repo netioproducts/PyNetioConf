@@ -19,6 +19,21 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   firmware and leaves the others as they are. On 2.x.x-4.x.x devices and the 5.0.x beta it raises
   `NotImplementedError`.
 - `constants.USER_PRIVILEGES` lists the privileges a user can have on 5.x firmware.
+- `load_defaults()` resets a 5.x device to its factory default configuration, waits until it has restarted and logs in
+  again as admin with the default password admin, which the device object uses from then on. The device restarts twice,
+  the second time when it marks itself installed; `load_defaults()` returns after both, about a minute after the
+  request. The network settings are reset too, so a device with a static IP address can come back at another address.
+  Checked on 5.4.0. On 2.x.x-4.x.x devices and the 5.0.x beta it raises `NotImplementedError`. The timing is set by
+  `LOAD_DEFAULTS_GRACE_PERIOD`, `LOAD_DEFAULTS_RETRY_INTERVAL`, `LOAD_DEFAULTS_SETTLE_UPTIME` and
+  `LOAD_DEFAULTS_TIMEOUT`, and the default credentials are `DEFAULT_USERNAME` and `DEFAULT_PASSWORD` in `constants`.
+- `set_output_action(output_id, action)` controls an output with an `OutputAction` from `constants`: `ON`, `OFF`,
+  `SHORT_ON`, `SHORT_OFF` or `TOGGLE`. The short actions switch the output for its reset delay and then back.
+  `short_on_output(output_id)` and `toggle_output(output_id)` do one action each, like `set_output` and
+  `reset_output`, which now go through `set_output_action` as well. On 2.x.x-4.x.x devices and the 5.0.x beta,
+  `set_output_action` does `ON`, `OFF` and `SHORT_OFF` with the requests `set_output` and `reset_output` already used,
+  and raises `NotImplementedError` for the others, like `short_on_output` and `toggle_output` do there.
+- `set_output_reset_delay(output_id, reset_delay)` sets an output's reset delay in milliseconds on 5.x firmware. On
+  2.x.x-4.x.x devices and the 5.0.x beta it raises `NotImplementedError`.
 
 ### Changed
 
@@ -99,6 +114,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `user_permissions`. `change_password` then changed the previous user's password, and the logins after a dropped
   connection went back to the previous user. `login` now keeps the credentials of a successful login and, when the
   user changes, reads the new user's privileges into `user_permissions`.
+- On 5.x firmware, `reset_output` resets the output: it switches it off for its reset delay and then on again. It used to
+  raise `NotImplementedError`.
 - On 5.x firmware, `logout` now closes the WebSocket connection and stops the keep-alive. It used to only drop the
   connection, so the device kept the session open until Python's garbage collector closed the socket, and on 5.2.x and
   newer the keep-alive logged in again on a new connection within 120 seconds. The device has room for only a few

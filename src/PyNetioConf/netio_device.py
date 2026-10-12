@@ -10,6 +10,8 @@ from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
 
+from .constants import OutputAction
+
 # from .NetioManager import NetioManager
 
 
@@ -189,14 +191,78 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def reset_output(self, output_id: int) -> None:
+    def set_output_action(self, output_id: int, action: OutputAction) -> None:
         """
-        Reset the output given its ID.
+        Controls an output: switches it on or off, toggles it, or switches it for its reset delay (short on, short off).
+        set_output, reset_output, short_on_output and toggle_output do the same for one action each.
 
         Parameters
         ----------
         output_id: int
             The number of the output.
+        action: OutputAction
+            What to do, OutputAction.ON, OFF, SHORT_ON, SHORT_OFF or TOGGLE. The short actions last the output's reset
+            delay (resetDelay in get_output_data(), set with set_output_reset_delay()).
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The action isn't an OutputAction.
+        """
+        pass
+
+    @abstractmethod
+    def reset_output(self, output_id: int) -> None:
+        """
+        Resets the output: switches it off for its reset delay, then on again (short off).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        """
+        pass
+
+    @abstractmethod
+    def short_on_output(self, output_id: int) -> None:
+        """
+        Switches the output on for its reset delay, then off again (short on).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        """
+        pass
+
+    @abstractmethod
+    def toggle_output(self, output_id: int) -> None:
+        """
+        Switches the output to the opposite state.
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
+        """
+        Sets how long reset_output and short_on_output keep the output switched (resetDelay in get_output_data()).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        reset_delay: int
+            The delay in milliseconds, more than 0.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The delay isn't a positive whole number.
         """
         pass
 
@@ -1680,6 +1746,29 @@ class NETIODevice(ABC):
     def system_reset(self) -> None:
         """
         Triggers an immediate system reset (reboot).
+        """
+        pass
+
+    @abstractmethod
+    def load_defaults(self) -> None:
+        """
+        Resets the device to its factory default configuration, which restarts it. Afterwards the device has only the
+        user admin, with the password admin. Waits until the device is back and logs in as admin with that password;
+        the device object uses these credentials from then on. The device restarts twice: once to load the defaults,
+        and once more when it marks itself installed after getting a network address. This method returns after both.
+
+        The network settings are reset too. A device that had a static IP address can come back at another address,
+        and logging back in then fails.
+
+        Raises
+        ------
+        PermissionError
+            The device refused the request for the logged-in user.
+        CommunicationError
+            The device refused the request for another reason, or didn't come back within LOAD_DEFAULTS_TIMEOUT
+            seconds.
+        AuthError
+            The device came back but refused admin with the default password.
         """
         pass
 

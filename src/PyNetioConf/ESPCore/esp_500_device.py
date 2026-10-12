@@ -35,10 +35,17 @@ from websocket import WebSocket
 from .. import NetioManager
 from ..constants import (
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
+    DEFAULT_PASSWORD,
     DEFAULT_REQUEST_QUEUE_LEN,
+    DEFAULT_USERNAME,
+    LOAD_DEFAULTS_GRACE_PERIOD,
+    LOAD_DEFAULTS_RETRY_INTERVAL,
+    LOAD_DEFAULTS_SETTLE_UPTIME,
+    LOAD_DEFAULTS_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
     USER_PRIVILEGES,
+    OutputAction,
 )
 from ..exceptions import (
     AuthError,
@@ -556,24 +563,48 @@ class ESP500Device(NETIODevice):
         self._set_output_config(output_id, output_name=output_name)
 
     @override
-    def set_output(self, output_id: int, state: bool) -> None:
+    def set_output_action(self, output_id: int, action: OutputAction) -> None:
+        try:
+            request = OutputAction(action)
+        except ValueError:
+            raise InvalidParameterValueError(
+                f"Unknown output action {action!r}, the possible ones are {[a.value for a in OutputAction]}"
+            ) from None
         ws_type = "SET"
         ws_topic = f"outputs/id/{output_id}/ctrl"
-        ws_data = {"request": "on" if state else "off"}
+        ws_data = {"request": request.value}
 
         self._check_socket_index(output_id)
         self.logger.debug(
-            f"Setting output {output_id} to {state} on device {self.host}"
+            f"Setting output {output_id} to {request.name} on device {self.host}"
         )
-        ws_api.send_request(
-            self,
-            ws_type,
-            ws_topic,
-            ws_data,
-        )
-        self.logger.debug(
-            f"Setting output {output_id} on device {self.host} to {state}."
-        )
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def set_output(self, output_id: int, state: bool) -> None:
+        self.logger.debug(f"Switching output {output_id} {'on' if state else 'off'} on device {self.host}")
+        self.set_output_action(output_id, OutputAction.ON if state else OutputAction.OFF)
+
+    @override
+    def short_on_output(self, output_id: int) -> None:
+        self.logger.debug(f"Switching output {output_id} on for its reset delay on device {self.host}")
+        self.set_output_action(output_id, OutputAction.SHORT_ON)
+
+    @override
+    def toggle_output(self, output_id: int) -> None:
+        self.logger.debug(f"Toggling output {output_id} on device {self.host}")
+        self.set_output_action(output_id, OutputAction.TOGGLE)
+
+    @override
+    def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
+        # bool is an int as well, but True as 1 ms is surely a mistake
+        if isinstance(reset_delay, bool) or not isinstance(reset_delay, int) or reset_delay <= 0:
+            raise InvalidParameterValueError(
+                f"The reset delay is in milliseconds and has to be a whole number above 0, not {reset_delay!r}"
+            )
+        self._check_socket_index(output_id)
+        self.logger.debug(f"Setting the reset delay of output {output_id} to {reset_delay} ms on device {self.host}")
+        self._set_output_config(output_id, reset_delay=reset_delay)
 
     @override
     def set_outputs_unified(self, state: bool) -> None:
@@ -585,7 +616,8 @@ class ESP500Device(NETIODevice):
 
     @override
     def reset_output(self, output_id: int) -> None:
-        raise NotImplementedError("reset_output is not supported on 5.0.0+ firmware")
+        self.logger.debug(f"Resetting output {output_id} (short off) on device {self.host}")
+        self.set_output_action(output_id, OutputAction.SHORT_OFF)
 
     @override
     def reset_output_consumption_counter(self, output_id: int) -> None:
@@ -1826,6 +1858,85 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Triggering system reset (reboot) on device {self.host}")
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
         sleep(DEVICE_RESET_GRACE_PERIOD)
+
+    @override
+    def load_defaults(self) -> None:
+        ws_type = "SET"
+        ws_topic = "system/loaddefaults"
+        ws_data = {"loadDefaults": True}
+
+        self.logger.debug(f"Loading the default configuration on device {self.host}")
+        # The keep-alive would log in again with the old credentials while the device restarts
+        if self._ka_thread:
+            self._ka_thread.cancel()
+            self._ka_thread.join()
+        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        status = response.get("status")
+        if status is not None and status != "OK":
+            error: dict[str, Any] = response.get("error", {})
+            code = error.get("code", status)
+            message = f"Device {self.host} refused to load the default configuration: {code}"
+            if code == "Unauthorized":
+                raise PermissionError(message)
+            raise CommunicationError(message)
+        requested = perf_counter()
+        # The device restarts on its own, this connection ends with it
+        ws_api.close_connection(self.ws, graceful=False)
+        self.ws = None
+        self._log_in_after_defaults(requested)
+
+    def _log_in_after_defaults(self, requested: float) -> None:
+        """
+        Waits until the device has restarted with the default configuration and logs in as admin with the default
+        password. requested is the perf_counter() time at which the device accepted the request.
+
+        The first boot with the default configuration isn't the last one: once the device has a network address it marks
+        itself installed and restarts again. It is done when it reports installed and has either restarted since it was
+        seen not installed, or has been up for LOAD_DEFAULTS_SETTLE_UPTIME seconds.
+        """
+        sleep(LOAD_DEFAULTS_GRACE_PERIOD)
+        went_down = False
+        last_error: Exception | None = None
+        seen_not_installed: float | None = None
+        while True:
+            try:
+                self.login(DEFAULT_USERNAME, DEFAULT_PASSWORD)
+            except CommunicationError as e:
+                went_down = True
+                last_error = e
+            except AuthError as e:
+                # Until the restart the device still has the old configuration, where admin can have another password.
+                # These logins are retried on purpose, a refusal only counts once the device has been down.
+                if went_down:
+                    raise
+                last_error = e
+            else:
+                # Without a restart since a point in time, the uptime is at least the time since then, less up to 1 s
+                # because the device counts whole seconds. A busy device reports it late, which only makes it smaller.
+                uptime = self.get_uptime()
+                # A login before the first restart reaches the old configuration
+                if uptime < perf_counter() - requested - 1:
+                    if not self.get_system_info()["installed"]:
+                        seen_not_installed = perf_counter()
+                    elif (
+                        seen_not_installed is not None and uptime < perf_counter() - seen_not_installed - 1
+                    ) or uptime >= LOAD_DEFAULTS_SETTLE_UPTIME:
+                        self.user_permissions = self.get_user_privileges(DEFAULT_USERNAME)
+                        self.logger.info(f"Device {self.host} is back with the default configuration")
+                        return
+                self.logout()
+                last_error = None
+            if perf_counter() - requested > LOAD_DEFAULTS_TIMEOUT:
+                detail = (
+                    f"last login attempt: {last_error}"
+                    if last_error
+                    else "it still had the old configuration or hadn't finished installing the default one"
+                )
+                raise CommunicationError(
+                    f"Device {self.host} wasn't back with the default configuration {LOAD_DEFAULTS_TIMEOUT} seconds "
+                    f"after loading it, {detail}"
+                )
+            sleep(LOAD_DEFAULTS_RETRY_INTERVAL)
 
     @override
     def get_ethernet_settings(self) -> dict[str, Any]:

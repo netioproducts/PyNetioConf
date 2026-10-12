@@ -19,6 +19,7 @@ from xml.etree import ElementTree as ET
 
 import requests
 
+from ..constants import OutputAction
 from ..exceptions import (
     CommunicationError,
     ElementNotFound,
@@ -202,6 +203,31 @@ class ESPDevice(NETIODevice):
         self._check_socket_index(output_id)
         esp_api.send_request(self, "resetOutputState", {"output": output_id})
         self.logger.debug(f"Resetting output {output_id} on device {self.host}.")
+
+    def set_output_action(self, output_id: int, action: OutputAction) -> None:
+        try:
+            request = OutputAction(action)
+        except ValueError:
+            raise InvalidParameterValueError(
+                f"Unknown output action {action!r}, the possible ones are {[a.value for a in OutputAction]}"
+            ) from None
+        self.logger.debug(f"Setting output {output_id} to {request.name} on device {self.host}")
+        # Goes through the requests these firmware versions already have
+        if request in (OutputAction.ON, OutputAction.OFF):
+            self.set_output(output_id, request is OutputAction.ON)
+        elif request is OutputAction.SHORT_OFF:
+            self.reset_output(output_id)
+        else:
+            raise NotImplementedError(f"{request.name} is not implemented for legacy ESP devices")
+
+    def short_on_output(self, output_id: int) -> None:
+        raise NotImplementedError("short_on_output is not implemented for legacy ESP devices")
+
+    def toggle_output(self, output_id: int) -> None:
+        raise NotImplementedError("toggle_output is not implemented for legacy ESP devices")
+
+    def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
+        raise NotImplementedError("set_output_reset_delay is not implemented for legacy ESP devices")
 
     def set_output_schedule(
         self, output_id: int, schedule_id: int, enabled: bool | None = None
@@ -1445,6 +1471,12 @@ class ESPDevice(NETIODevice):
     def system_reset(self) -> None:
         raise NotImplementedError(
             "system_reset is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def load_defaults(self) -> None:
+        raise NotImplementedError(
+            "load_defaults is only available for devices 5.x.x and up, please update your device."
         )
 
     @override
