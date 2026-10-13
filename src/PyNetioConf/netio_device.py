@@ -5,7 +5,7 @@ extended by the device-specific classes.
 
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
@@ -1212,11 +1212,14 @@ class NETIODevice(ABC):
             Whether the protocol should be enabled or disabled. If disabling the protocol the device will restart.
             If None, keeps the setting already set on the device.
         location : str
-            The location of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
+            The location of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the
+            device.
         community_read : str
-            The community read of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
+            The community read of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set
+            on the device.
         community_write : str
-            The community write of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
+            The community write of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set
+            on the device.
 
         Returns
         -------
@@ -1311,7 +1314,8 @@ class NETIODevice(ABC):
             Whether the read only portion of the protocol should be enabled or disabled. If None, keeps the settins
             already on device.
         read_auth : Tuple[str, str]
-            Authentication pair tuple for read only in the format ("username", "password") If None, keeps the settins already on device.
+            Authentication pair tuple for read only in the format ("username", "password") If None, keeps the settins
+            already on device.
         write_enabled: bool
             Whether the write only portion of the protocol should be enabled or disabled. If None, keeps the settins
             already on device.
@@ -1643,7 +1647,8 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            A list of JSON objects, where each dictionary contains details of a single enabled PAB entry from the device.
+            A list of JSON objects, where each dictionary contains details of a single enabled PAB entry from the
+            device.
         """
         pass
 
@@ -1654,7 +1659,8 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            A list of JSON objects, where each dictionary contains details of a single disabled PAB entry from the device.
+            A list of JSON objects, where each dictionary contains details of a single disabled PAB entry from the
+            device.
         """
         pass
 

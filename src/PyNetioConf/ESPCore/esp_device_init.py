@@ -2,13 +2,12 @@ import logging
 import re
 import ssl
 from time import perf_counter, sleep
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
-import requests
 import websocket
 from websocket import WebSocket
 
-from ..exceptions import AuthError, CommunicationError, InvalidParameterValueError
+from ..exceptions import AuthError, InvalidParameterValueError
 from ..netio_device import NETIODevice
 from . import ws_api
 
@@ -145,7 +144,7 @@ def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs:
                     logger.debug("Couldn't establish ws connection in time, waiting to reconnect.")
                     sleep(10 - elapsed_time)
         except Exception as e:
-            logger.debug(f"Connection to {host} failed on {attempt + 1}/{try_count}")
+            logger.debug(f"Connection to {host} failed on {attempt + 1}/{try_count}: {e!r}")
             sleep(1)
             continue
 
@@ -214,7 +213,7 @@ def initialize_esp(
         # The device refused the credentials, it does have the WebSocket API, so no fallback to older firmware
         ws_api.close_connection(ws)
         raise
-    except:
+    except Exception:
         # A connection that was opened is closed, so the device doesn't keep a session for it
         ws_api.close_connection(ws, graceful=False)
         ws_req_id = 0

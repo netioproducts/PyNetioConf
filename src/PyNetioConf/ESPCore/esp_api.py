@@ -5,11 +5,11 @@ This module contains functions for sending requests to the device's API on EPS b
 import logging
 
 # from . import ESP200Device, ESP300Device, ESP400Device, ESP500Device
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any
 
 import requests
 
-from ..exceptions import CommunicationError, InvalidParameterValueError
+from ..exceptions import CommunicationError
 from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
     try:
         logger.debug(f"Checking connection health of {fw_object.host}.")
         response = requests.get(f"{protocol}://{fw_object.host}", timeout=timeout, verify=False)
-    except:
+    except requests.RequestException:
         logger.warn(f"Couldn't connect to device {fw_object.host}.")
         return -1
 

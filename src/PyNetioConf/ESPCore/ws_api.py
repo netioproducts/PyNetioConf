@@ -7,7 +7,7 @@ import random
 from collections.abc import Generator
 from io import BufferedIOBase
 from time import perf_counter, sleep
-from typing import Any, BinaryIO, NamedTuple, Tuple
+from typing import Any, NamedTuple
 
 from websocket import WebSocket, WebSocketConnectionClosedException
 
@@ -311,7 +311,6 @@ def chunk_file_upload(
         "topic": chunk_topic,
         "type": ws_type,
     }
-    import copy
 
     _debug_request = {
         **ws_request,
@@ -432,7 +431,8 @@ def device_init_request(
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    This is a simplified version of the send_request() function used for communication between PyNetioConf and a device which is yet to initialize.
+    This is a simplified version of the send_request() function used for communication between PyNetioConf and a device
+    which is yet to initialize.
     """
     request: dict[str, Any] = {"type": type, "reqId": ws_req_id}
     unsubscribe_needed = False

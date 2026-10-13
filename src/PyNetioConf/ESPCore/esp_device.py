@@ -10,9 +10,9 @@ import threading
 from time import sleep
 
 if sys.version_info >= (3, 12):
-    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+    from typing import Any, override
 else:
-    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing import Any
 
     from typing_extensions import override
 from xml.etree import ElementTree as ET
@@ -341,7 +341,8 @@ class ESPDevice(NETIODevice):
         encoded_data = json.dumps(data).encode("utf-8")
         esp_api.send_file(self, "/upload/config", encoded_data)
         self.logger.info(
-            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is restarting..."
+            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is "
+            "restarting..."
         )
         sleep(kwargs.get("sleep_time", 15))
         username = kwargs.get("username", self.username)
@@ -383,11 +384,13 @@ class ESPDevice(NETIODevice):
             _ = esp_api.send_request(self, "startUpgrade", close=True)
         except CommunicationError:
             self.logger.warn(
-                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
+                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if "
+                "the device connects, waiting for connection."
             )
 
         self.logger.debug(
-            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive for a while."
+            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive "
+            "for a while."
         )
         sleep(pre_reconnect_wait)
 

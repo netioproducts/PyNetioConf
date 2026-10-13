@@ -3,33 +3,19 @@ Implementation specifics for ESP devices with the firmware 5.4.x.
 """
 
 import atexit
-import json
-import os
-import ssl
 import sys
 from collections import deque
-from io import BytesIO
-from time import perf_counter, sleep
-from xml.etree.ElementTree import Element
-
-from PyNetioConf.constants import (
-    CLOUD_ACTION_COMMUNICATION_DELAY,
-    CLOUD_DEFAULT_CONNECTION_WAIT,
-    DEVICE_RESET_GRACE_PERIOD,
-    WS_DEFAULT_TIMEOUT,
-)
 
 if sys.version_info >= (3, 12):
-    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+    from typing import Any, override
 else:
-    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing import Any
 
     from typing_extensions import override
 
 import logging
 import threading
 
-import websocket
 from websocket import WebSocket
 
 from .. import NetioManager
@@ -37,11 +23,8 @@ from ..constants import DEFAULT_KEEP_ALIVE_QUEUE_LEN, DEFAULT_REQUEST_QUEUE_LEN
 from ..exceptions import (
     CommunicationError,
     ElementNotFound,
-    InvalidParameterValueError,
-    InvalidSocketIndex,
 )
-from ..netio_device import NETIODevice
-from . import esp_api, ws_api
+from . import ws_api
 from .esp_520_device import ESP520Device
 
 
@@ -137,8 +120,10 @@ class ESP540Device(ESP520Device):
             disable_warnings(category=InsecureRequestWarning)
 
         # Before we start dealing with websocket communication past initiation we create a deque for the responses.
-        # This is mainly to mitigate potential desynchronization between the device requests and the library posting them.
-        # This is mostly due to SUBSCRIBE topics sending events which we don't react to given the request-response architecture
+        # This is mainly to mitigate potential desynchronization between the device requests and the library posting
+        # them.
+        # This is mostly due to SUBSCRIBE topics sending events which we don't react to given the request-response
+        # architecture
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)

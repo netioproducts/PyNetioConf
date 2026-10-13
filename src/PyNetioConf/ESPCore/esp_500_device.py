@@ -5,7 +5,6 @@ Implementation specifics for ESP devices with the firmware 5.0.x.
 import atexit
 import json
 import os
-import ssl
 import sys
 from collections import deque
 from enum import StrEnum
@@ -21,9 +20,9 @@ from PyNetioConf.constants import (
 )
 
 if sys.version_info >= (3, 12):
-    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+    from typing import Any, AnyStr, override
 else:
-    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing import Any, AnyStr
 
     from typing_extensions import override
 
@@ -63,7 +62,6 @@ from ..exceptions import (
 )
 from ..netio_device import NETIODevice
 from . import esp_api, ws_api
-from .esp_400_device import ESP400Device
 
 
 def _value_or_current(value: Any, current: dict[str, Any], key: str) -> Any:
@@ -183,8 +181,10 @@ class ESP500Device(NETIODevice):
             disable_warnings(category=InsecureRequestWarning)
 
         # Before we start dealing with websocket communication past initiation we create a deque for the responses.
-        # This is mainly to mitigate potential desynchronization between the device requests and the library posting them.
-        # This is mostly due to SUBSCRIBE topics sending events which we don't react to given the request-response architecture
+        # This is mainly to mitigate potential desynchronization between the device requests and the library posting
+        # them.
+        # This is mostly due to SUBSCRIBE topics sending events which we don't react to given the request-response
+        # architecture
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
@@ -227,7 +227,8 @@ class ESP500Device(NETIODevice):
 
     def _keep_alive(self) -> None:
         self.logger.debug(
-            f"Keep-alive stub called for device {self.host}, keep-alive functianolity is restored on devices running 5.2.x and up, please update."
+            f"Keep-alive stub called for device {self.host}, keep-alive functianolity is restored on devices running "
+            "5.2.x and up, please update."
         )
 
     @override
@@ -1374,7 +1375,8 @@ class ESP500Device(NETIODevice):
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
         esp_api.send_file(self, "/cfgimport", encoded_data)
         self.logger.info(
-            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is restarting..."
+            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is "
+            "restarting..."
         )
         sleep(kwargs.get("sleep_time", 15))
         username = kwargs.get("username", self.username)
@@ -1409,16 +1411,19 @@ class ESP500Device(NETIODevice):
             _ = esp_api.send_request(self, "startUpgrade", close=True)
         except CommunicationError:
             self.logger.warn(
-                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
+                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if "
+                "the device connects, waiting for connection."
             )
         self.logger.debug(
-            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive for a while."
+            f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive "
+            "for a while."
         )
 
         sleep(pre_reconnect_wait)
 
         self.logger.debug(
-            f"Retrying connection to device {self.host} after updating firmware to {getattr(file, 'name', 'in-memory file')}."
+            f"Retrying connection to device {self.host} after updating firmware to "
+            f"{getattr(file, 'name', 'in-memory file')}."
         )
         device_response_time = esp_api.check_connectivity(self)
         retry_limit = 3 if device_response_time == -1 else 0

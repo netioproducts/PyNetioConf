@@ -6,10 +6,8 @@ import atexit
 import io
 import json
 import os
-import ssl
 import sys
 from collections import deque
-from io import BytesIO
 from pathlib import Path
 from time import sleep, time
 
@@ -19,22 +17,21 @@ from ..constants import (
 )
 
 if sys.version_info >= (3, 12):
-    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+    from typing import Any, override
 else:
-    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing import Any
 
     from typing_extensions import override
 
 import logging
 import threading
 
-import websocket
 from websocket import WebSocket
 
 from .. import NetioManager
 from ..exceptions import CommunicationError, ElementNotFound
 from ..netio_device import NETIODevice
-from . import esp_api, ws_api
+from . import ws_api
 from .esp_500_device import ESP500Device
 
 
@@ -256,7 +253,8 @@ class ESP520Device(ESP500Device):
             ws_api.upload_file(self, file, upload_id)
         except CommunicationError:
             self.logger.warning(
-                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
+                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if "
+                "the device connects, waiting for connection."
             )
         self.logger.debug(f"Uploaded firmware, device {self.host} might be unresponsive for a while.")
 
@@ -265,7 +263,8 @@ class ESP520Device(ESP500Device):
         sleep(pre_reconnect_wait)
 
         self.logger.debug(
-            f"Retrying connection to device {self.host} after updating firmware to new version, the device class is now going to update."
+            f"Retrying connection to device {self.host} after updating firmware to new version, the device class is "
+            "now going to update."
         )
 
         # TODO: Check connectivity for new FW
@@ -285,7 +284,8 @@ class ESP520Device(ESP500Device):
 
         if isinstance(updated_instance, NETIODevice):
             self.logger.info(
-                f"The device has updated to {updated_instance.get_version_detailed()}, the device object is now of the {type(updated_instance)} class, check documentation for supported features and changes."
+                f"The device has updated to {updated_instance.get_version_detailed()}, the device object is now of "
+                f"the {type(updated_instance)} class, check documentation for supported features and changes."
             )
 
         if not updated_instance:

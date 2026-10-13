@@ -64,6 +64,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - On 5.x firmware, `set_ethernet_settings` and `set_snmp_v3_api_state` raise `InvalidParameterValueError` for a
   `network_mode`, `security_level`, `auth_protocol` or `priv_protocol` the device doesn't know, before sending
   anything, instead of sending it to the device. `set_netio_push_api_state` already did that for `push_protocol`.
+- Modules no longer import names they don't use, so those names can't be imported from them any more. For example
+  `from PyNetioConf.NetioManager import FirmwareVersionNotSupported` now fails; import exceptions from
+  `PyNetioConf.exceptions`, constants from `PyNetioConf.constants`, and the device classes from their own modules.
+  `PyNetioConf` declares `__all__ = ["NetioManager"]`, so `from PyNetioConf import *` imports only `NetioManager`.
+- When a 5.x connection attempt fails, the debug log says why.
 
 ### Removed
 
@@ -72,6 +77,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Fixed
 
+- Ctrl-C stops the program while `init_device` detects the firmware version and during `esp_api.check_connectivity`.
+  Both caught every exception, `KeyboardInterrupt` included; now `check_connectivity` catches only request errors and
+  the version detection only `Exception`.
 - Firmware updates on 2.x.x-4.x.x devices and the 5.0.x beta no longer fail with `AttributeError` after the upload,
   the device now keeps the `NetioManager` it was created by.
 - `NetioManager.update_device` now updates the device it was given; it used to match devices by serial number, which

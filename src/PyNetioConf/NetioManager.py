@@ -4,11 +4,11 @@ Module for managing NETIO devices across a session without creating multiple con
 
 import atexit
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import requests
 
-from PyNetioConf.exceptions import CommunicationError, FirmwareVersionNotSupported
+from PyNetioConf.exceptions import CommunicationError
 
 from .ESPCore import esp_device_init
 from .netio_device import NETIODevice
