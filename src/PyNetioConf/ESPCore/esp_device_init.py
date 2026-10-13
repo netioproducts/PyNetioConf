@@ -88,14 +88,14 @@ def _setup_ssl(**kwargs: Any) -> tuple[ssl.SSLContext, dict[str, Any]]:
             if kwargs.get("ssl_password", None) is not None:
                 ssl_options["password"] = kwargs.get("ssl_password")
                 _ssl_context.load_cert_chain(
-                    kwargs.get("ssl_certfile"),
-                    kwargs.get("ssl_keyfile"),
-                    kwargs.get("ssl_password"),
+                    kwargs["ssl_certfile"],
+                    kwargs["ssl_keyfile"],
+                    kwargs["ssl_password"],
                 )
             else:
-                _ssl_context.load_cert_chain(kwargs.get("ssl_certfile"), kwargs.get("ssl_keyfile"))
+                _ssl_context.load_cert_chain(kwargs["ssl_certfile"], kwargs["ssl_keyfile"])
         else:
-            _ssl_context.load_cert_chain(kwargs.get("ssl_certfile"))
+            _ssl_context.load_cert_chain(kwargs["ssl_certfile"])
 
     if kwargs.get("ssl_check_hostname", None) is not None:
         check_hostname = kwargs.get("ssl_check_hostname")
@@ -170,6 +170,9 @@ def initialize_esp(
     version = 4  # TODO: Do version parsing here, not in NetioManager as this is ESP thing, not general NETIO thing
     minor = 0
     patch = 0
+    # Set before the try for the type checker, the 5.x branches below are only reached once the try has set both
+    hello_response: dict[str, Any] = {}
+    ssl_options: dict[str, Any] = {}
     try:
         try_count = 3 if not kwargs.get("ws_expected", False) else 15
         ssl_options = _setup_ssl(**kwargs)[1] if use_https else {}

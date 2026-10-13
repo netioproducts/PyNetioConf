@@ -3,8 +3,10 @@ The implementation of the NETIODevice class for ESP firmware based devices.
 """
 
 import atexit
+import io
 import json
 import logging
+import os
 import sys
 import threading
 from time import sleep
@@ -362,7 +364,10 @@ class ESPDevice(NETIODevice):
             self.logger.debug(f"Saved configuration to {save_file}")
         return response.json()
 
-    def update_firmware(self, file) -> NETIODevice:
+    def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as firmware_file:
+                return self.update_firmware(firmware_file)
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
@@ -401,6 +406,10 @@ class ESPDevice(NETIODevice):
 
         if device_response_time == -1:
             raise CommunicationError("Device couldn't establish connection after firmware update.")
+        if not isinstance(self.netio_manager, NetioManager):
+            raise CommunicationError(
+                f"Couldn't get the updated device instance for {self.host}, the device has no NetioManager to create it"
+            )
         updated_instance = self.netio_manager.update_device(self)
 
         return updated_instance
@@ -591,6 +600,11 @@ class ESPDevice(NETIODevice):
 
     # region URLAPI
 
+    def get_urlapi_state(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_urlapi_state is only available for devices 5.x.x and up, please update your device."
+        )
+
     def set_urlapi_state(
         self,
         protocol_enabled: bool | None = None,
@@ -636,7 +650,7 @@ class ESPDevice(NETIODevice):
         ip_from = "" if ip_from is None else ip_from
         ip_to = "" if ip_to is None else ip_to
         modbus_data = self.get_modbus_state()
-        json_data = {"enable": protocol_enabled, "port": port, "id": 107}
+        json_data: dict[str, Any] = {"enable": protocol_enabled, "port": port, "id": 107}
         if ip_filter_enabled:
             if ip_from == "":
                 ip_from = modbus_data["ipFilter"]["ipFrom"]
@@ -889,6 +903,8 @@ class ESPDevice(NETIODevice):
         community_write: str | None = None,
     ) -> None:
         self._require_arguments("set_snmp_v1_2_api_state", protocol_enabled=protocol_enabled)
+        # Only narrows the type, _require_arguments() above raised if it is None
+        assert protocol_enabled is not None
         self.logger.debug(f"Setting SNMP v1,2c API state on device {self.host}")
         if not protocol_enabled:
             self.logger.debug("The protocol is being disabled, the device will restart.")
@@ -906,6 +922,8 @@ class ESPDevice(NETIODevice):
         priv_key: str | None = None,
     ) -> None:
         self._require_arguments("set_snmp_v3_api_state", protocol_enabled=protocol_enabled)
+        # Only narrows the type, _require_arguments() above raised if it is None
+        assert protocol_enabled is not None
         self.logger.debug(f"Setting SNMP v3 API state on device {self.host}")
         if not protocol_enabled:
             self.logger.debug("The protocol is being disabled, the device will restart.")
@@ -925,6 +943,11 @@ class ESPDevice(NETIODevice):
 
     # region XML
 
+    def get_xml_api_state(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            "get_xml_api_state is only available for devices 5.x.x and up, please update your device."
+        )
+
     def set_xml_api_state(
         self,
         protocol_enabled: bool | None = None,
@@ -941,6 +964,8 @@ class ESPDevice(NETIODevice):
             read_auth=read_auth,
             write_auth=write_auth,
         )
+        # Only narrows the types, _require_arguments() above raised if either is None
+        assert read_auth is not None and write_auth is not None
         # TODO: Make the parameters optional, so only a specific setting can be changed.
         request_data = {
             "enable": protocol_enabled,
@@ -1019,6 +1044,14 @@ class ESPDevice(NETIODevice):
                 return rule
         self.logger.info(f"Unable to find rule {rule_name} on device {self.host}")
         raise ElementNotFound
+
+    def create_rule(self, enable: bool, name: str, config: dict[str, Any]) -> None:
+        raise NotImplementedError("create_rule is only available for devices 5.x.x and up, please update your device.")
+
+    def delete_rule_by_name(self, name: str) -> None:
+        raise NotImplementedError(
+            "delete_rule_by_name is only available for devices 5.x.x and up, please update your device."
+        )
 
     def get_watchdogs(self) -> list[dict[str, Any]]:
         action = "getWatchdogs"
@@ -1120,6 +1153,11 @@ class ESPDevice(NETIODevice):
         self.logger.debug(f"Clearing system log from device {self.host}")
         _ = esp_api.send_request(self, action, {})
 
+    def create_watchdog(self, enable: bool, name: str, config: dict[str, Any]) -> None:
+        raise NotImplementedError(
+            "create_watchdog is only available for devices 5.x.x and up, please update your device."
+        )
+
     def get_pabs(self) -> list[dict[str, Any]]:
         action = "getPABList"
         self.logger.debug(f"Getting PABs from device {self.host}")
@@ -1152,6 +1190,9 @@ class ESPDevice(NETIODevice):
             if pab["name"] == pab_name:
                 return pab
         raise ElementNotFound
+
+    def create_pab(self, enable: bool, name: str, config: dict[str, Any]) -> None:
+        raise NotImplementedError("create_pab is only available for devices 5.x.x and up, please update your device.")
 
     def delete_pab_by_name(self, pab_name: str) -> None:
         action = "deletePAB"
@@ -1190,7 +1231,7 @@ class ESPDevice(NETIODevice):
     def get_mqttflex_state(self) -> dict[str, Any]:
         raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
-    def set_mqttflex_state(self, state: bool | None = None, config: dict | None = None) -> None:
+    def set_mqttflex_state(self, state: bool | None = None, config: dict[str, Any] | None = None) -> None:
         raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
     def upload_mqtt_ca_certificate(self, ca: str) -> None:

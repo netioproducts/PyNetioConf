@@ -131,7 +131,7 @@ class ESP540Device(ESP520Device):
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
-        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
+        self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):
             self.session_id = "TODO AUTH"
         else:

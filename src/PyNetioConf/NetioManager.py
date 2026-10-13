@@ -39,7 +39,7 @@ class NetioManager:
         password: str,
         keep_alive: bool = True,
         use_https: bool = False,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> NETIODevice:
         """
         Initialize a Netio device object, create a connection to the device, get its platform type and return
@@ -74,7 +74,7 @@ class NetioManager:
         self._connected_devices.append(netio_device)
         return netio_device
 
-    def update_device(self, netio_device: NETIODevice, **kwargs) -> NETIODevice:
+    def update_device(self, netio_device: NETIODevice, **kwargs: Any) -> NETIODevice:
         """
         Update the device object in the device list and return its new instance,
         main use for updating firmware between major versions.
@@ -131,7 +131,7 @@ class NetioManager:
             raise ValueError("Invalid firmware version string")
 
     @staticmethod
-    def get_info(host: str) -> dict:
+    def get_info(host: str) -> dict[str, Any]:
         """
         Get version information from the device.
 
@@ -160,7 +160,7 @@ class NetioManager:
         return response.json()
 
     @staticmethod
-    def esp_get_platform(host) -> tuple[str, str]:
+    def esp_get_platform(host: str) -> tuple[str, str]:
         """
         Get platform information from the device, as well as the serial number.
 

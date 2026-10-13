@@ -3,12 +3,12 @@ Implementation specifics for ESP devices with the firmware 5.0.x.
 """
 
 import atexit
+import io
 import json
 import os
 import sys
 from collections import deque
 from enum import StrEnum
-from io import BytesIO
 from time import perf_counter, sleep
 from xml.etree.ElementTree import Element
 
@@ -20,14 +20,15 @@ from PyNetioConf.constants import (
 )
 
 if sys.version_info >= (3, 12):
-    from typing import Any, AnyStr, override
+    from typing import Any, override
 else:
-    from typing import Any, AnyStr
+    from typing import Any
 
     from typing_extensions import override
 
 import logging
 import threading
+import warnings
 
 import websocket
 from websocket import WebSocket
@@ -192,7 +193,7 @@ class ESP500Device(NETIODevice):
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
-        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
+        self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):
             self.session_id = "TODO AUTH"
         else:
@@ -662,13 +663,15 @@ class ESP500Device(NETIODevice):
 
         ws_api.send_request(self, ws_type, topic, rule_data)
 
+    @override
     def create_rule(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         topic = "/rules/create"
         try:
             self.get_rule_by_name(name)
-            raise
         except ElementNotFound:
             pass
+        else:
+            raise ElementAlreadyExists(f"Rule {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create rule {name} on device {self.host}.")
         self.logger.debug(f"Rule configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
@@ -704,13 +707,15 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Filtering for disabled rules from device {self.host}")
         return [rule for rule in rules if rule.get("enabled") is False]
 
+    @override
     def create_pab(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         topic = "/pab/create"
         try:
             self.get_pab_by_name(name)
-            raise
         except ElementNotFound:
             pass
+        else:
+            raise ElementAlreadyExists(f"PAB {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create PAB {name} on device {self.host}.")
         self.logger.debug(f"PAB configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
@@ -746,13 +751,15 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Filtering for disabled PABs from device {self.host}")
         return [pab for pab in pabs if pab.get("enabled") is False]
 
+    @override
     def create_watchdog(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         topic = "/wdtpingers/create"
         try:
             self.get_watchdog_by_name(name)
-            raise
         except ElementNotFound:
             pass
+        else:
+            raise ElementAlreadyExists(f"Watchdog {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create watchdog {name} on device {self.host}.")
         self.logger.debug(f"Watchdog configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
@@ -788,7 +795,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Filtering for disabled watchdogs from device {self.host}")
         return [w for w in watchdogs if w.get("enabled") is False]
 
-    def create_schedule(self, name: str, intervals: list[dict[int, Any]]) -> None:
+    def create_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
         topic = "/schedules/create"
         ws_type = "SET"
         ws_data = {
@@ -873,6 +880,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Attempting to delete schedule {schedule_name} on device {self.host}.")
         ws_api.send_request(self, ws_type, topic, ws_data)
 
+    @override
     def delete_rule_by_name(self, name: str) -> None:
         # Check for rule existing, error out if it doesn't
         try:
@@ -946,6 +954,7 @@ class ESP500Device(NETIODevice):
                 supported_ids.append(protocol_map[name])
         return supported_ids
 
+    @override
     def get_xml_api_state(self) -> dict[str, Any]:
         self.logger.debug(f"Getting XML API state on device {self.host}")
         ws_type = "SUBSCRIBE"
@@ -1220,6 +1229,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"JSON configuration: {json.dumps(logged_data, indent=4)}")
         _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
+    @override
     def get_urlapi_state(self) -> dict[str, Any]:
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/url/config"
@@ -1247,12 +1257,18 @@ class ESP500Device(NETIODevice):
         }
         _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
-    def get_measurement(self):
-        ws_type = "SUBSCRIBE"
-        ws_topic = "outputs/measure"
-
-        self.logger.debug(f"Fetching raw measurements from device {self.host}")
-        return ws_api.send_request(self, ws_type, ws_topic)
+    def get_measurement(self) -> list[dict[str, Any]]:
+        """
+        Deprecated, use get_outputs_data(), which this returns. It used to return the device's whole reply to
+        outputs/measure. Removed in PyNetioConf 1.0.
+        """
+        warnings.warn(
+            "get_measurement() is deprecated and will be removed in PyNetioConf 1.0, use get_outputs_data()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.logger.debug(f"Fetching measurements through the deprecated get_measurement() on device {self.host}")
+        return self.get_outputs_data()
 
     def upload_mqtt_client_key(self, key: str) -> None:
         ws_type = "SET"
@@ -1284,7 +1300,7 @@ class ESP500Device(NETIODevice):
         _ = esp_api.send_file(self, upload_path, ca)
         sleep(0.1)
 
-    def get_mqttflex_state(self) -> dict:
+    def get_mqttflex_state(self) -> dict[str, Any]:
         ws_type = "SUBSCRIBE"
         ws_topic = "protocols/mqtt/config"
 
@@ -1359,7 +1375,7 @@ class ESP500Device(NETIODevice):
                 json.dump(config["data"]["config"], file)
         return config["data"]["config"]
 
-    def import_config(self, file, **kwargs) -> None:
+    def import_config(self, file, **kwargs: Any) -> None:
         ws_type = "SET"
         ws_topic = "system/cfgimport"
         ws_data: dict[str, Any] = {}
@@ -1387,7 +1403,10 @@ class ESP500Device(NETIODevice):
             self.login(username, password, logout=True)
 
     @override
-    def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
+    def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as firmware_file:
+                return self.update_firmware(firmware_file)
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:

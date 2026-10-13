@@ -20,11 +20,11 @@ demo_8qs = demo_devices.init_device("powerpdu-8qs.netio-products.com", "demo", "
 # documentation generator for the whole project.
 
 # See the socket states
-print(f"{demo_8qs.hostname} socket states {demo_8qs.get_socket_states()}")
+print(f"{demo_8qs.hostname} socket states {demo_8qs.get_output_states()}")
 demo_8qs.set_output(1, False)
-print(f"{demo_8qs.hostname} socket states {demo_8qs.get_socket_states()}")
+print(f"{demo_8qs.hostname} socket states {demo_8qs.get_output_states()}")
 demo_8qs.set_output(1, True)
-print(f"{demo_8qs.hostname} socket states {demo_8qs.get_socket_states()}")
+print(f"{demo_8qs.hostname} socket states {demo_8qs.get_output_states()}")
 # demo_8qs.set_output(0, True) # Using PyNetioConf out of bounds would throw an Exception
 
 demo_4ps = demo_devices.init_device("powerpdu-4ps.netio-products.com:22888", "demo", "demo")
@@ -33,7 +33,7 @@ demo_4ps.set_output(1, True)
 demo_4c = demo_devices.init_device("netio-4c.netio-products.com", "demo", "demo")
 demo_4c.set_output(1, True)
 demo_4c.set_outputs_unified(False)
-print(f"{demo_4c.hostname} socket states {demo_4c.get_socket_states()}")
+print(f"{demo_4c.hostname} socket states {demo_4c.get_output_states()}")
 
 # Devices throw exceptions when you try to set features that aren't supported
 # demo_8qs.get_wifi_settings() # Throws a FeatureNotSupported exception

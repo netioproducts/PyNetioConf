@@ -2,6 +2,7 @@
 This module contains functions for sending requests to the device's API on EPS based devices.
 """
 
+import io
 import logging
 
 # from . import ESP200Device, ESP300Device, ESP400Device, ESP500Device
@@ -175,7 +176,18 @@ def send_request(
     return response
 
 
-def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -> requests.Response:
+def _ssl_upload_type(url_path: str, host: str) -> str:
+    """The content type of a certificate or key upload to an upload/ssl/ path, by the kind of file the path names."""
+    if "mqtt_client_key" in url_path:
+        return "application/x-iwork-keynote-sffkey"
+    if any(kind in url_path for kind in ("mqtt_client_cert", "mqtt_root_ca", "srvkey", "srvcert")):
+        return "application/x-x509-ca-cert"
+    raise CommunicationError(f"Unknown certificate upload path {url_path} on device {host}")
+
+
+def send_file(
+    fw_object: NETIODevice, url_path: str, file: str | bytes | io.IOBase, timeout: int = 600
+) -> requests.Response:
     """
     Upload a file to the device on the specified URL path, returns the response of the request.
 
@@ -219,11 +231,7 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
             logger.debug(f"Uploading firmware to {netio_host}")
             response = session.post(url=netio_host, files={"file": file}, timeout=timeout, verify=False)
         elif "upload/ssl/" in url_path:
-            cert_types = ["mqtt_client_cert", "mqtt_client_key", "srvkey", "srvcert", "mqtt_root_ca"]
-            if "mqtt_client_key" in url_path:
-                filetype = "application/x-iwork-keynote-sffkey"
-            elif any(cert in url_path for cert in cert_types):
-                filetype = "application/x-x509-ca-cert"
+            filetype = _ssl_upload_type(url_path, fw_object.host)
             logger.debug(f"Uploading SSL certificate to {netio_host}")
             response = session.post(
                 url=netio_host,
@@ -276,10 +284,7 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
                 logger.debug(f"Uploading firmware to {netio_host}")
                 response = session.post(url=netio_host, files={"file": file}, timeout=timeout, verify=False)
             elif "upload/ssl/" in url_path:
-                if "mqtt_client_key" in url_path:
-                    filetype = "application/x-iwork-keynote-sffkey"
-                elif "mqtt_client_cert" in url_path or "mqtt_root_ca" in url_path:
-                    filetype = "application/x-x509-ca-cert"
+                filetype = _ssl_upload_type(url_path, fw_object.host)
                 logger.debug(f"Uploading SSL certificate to {netio_host}")
                 response = session.post(
                     url=netio_host,

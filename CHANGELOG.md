@@ -37,6 +37,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - Enums in `constants` for the settings that take one of a few strings: `NetworkMode` for `set_ethernet_settings`,
   `PushProtocol` for `set_netio_push_api_state`, and `SnmpSecurityLevel`, `SnmpAuthProtocol` and `SnmpPrivProtocol`
   for `set_snmp_v3_api_state`. They are `StrEnum`s, so the plain strings keep working.
+- `get_xml_api_state`, `get_urlapi_state`, `create_rule`, `delete_rule_by_name`, `create_pab` and `create_watchdog`,
+  which 5.x devices already had, are part of `NETIODevice` now, so they show up for any device `init_device` returns.
+  On 2.x.x-4.x.x devices and the 5.0.x beta they raise `NotImplementedError`.
 
 ### Changed
 
@@ -70,6 +73,12 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `PyNetioConf` declares `__all__ = ["NetioManager"]`, so `from PyNetioConf import *` imports only `NetioManager`.
 - When a 5.x connection attempt fails, the debug log says why.
 
+### Deprecated
+
+- `get_measurement()` on 5.x devices. It warns with `DeprecationWarning`, returns what `get_outputs_data()` returns
+  and will be removed in 1.0. It used to return the device's whole reply to `outputs/measure`, so code that read
+  `type`, `status` or `data` from it breaks; use `get_outputs_data()`.
+
 ### Removed
 
 - Support for Python 3.10, which reached its end of life in October 2026. PyNetioConf now needs Python 3.11 or newer.
@@ -77,6 +86,18 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Fixed
 
+- `update_firmware` takes the path of the firmware file on every firmware version, as it already did on 5.2.x and
+  newer. On 2.x.x-4.x.x devices, the 5.0.x beta and 5.1.x only a file opened in binary mode worked, although 5.1.x
+  declared a path. `NETIODevice.update_firmware` documents the parameter and that it returns the device object for
+  the new firmware.
+- `update_firmware` on 2.x.x-4.x.x devices raises `CommunicationError` when the device has no `NetioManager` to create
+  the updated device object, instead of `AttributeError`, as on 5.x.
+- Certificate and key uploads (`esp_api.send_file`, used for the MQTT and HTTPS certificates) no longer fail with
+  `UnboundLocalError` when they retry an HTTPS server key or certificate after a failed attempt. An upload path of a
+  kind the library doesn't know raises `CommunicationError` instead of `UnboundLocalError`.
+- `create_rule`, `create_pab` and `create_watchdog` raise `ElementAlreadyExists` when the name is taken, instead of
+  `RuntimeError: No active exception to reraise`.
+- `examples/usage_example.py` calls `get_output_states()`, the `get_socket_states()` it called no longer exists.
 - Ctrl-C stops the program while `init_device` detects the firmware version and during `esp_api.check_connectivity`.
   Both caught every exception, `KeyboardInterrupt` included; now `check_connectivity` catches only request errors and
   the version detection only `Exception`.

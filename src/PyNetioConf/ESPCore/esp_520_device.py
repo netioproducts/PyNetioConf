@@ -131,7 +131,7 @@ class ESP520Device(ESP500Device):
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
-        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
+        self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):
             self.session_id = "TODO AUTH"
         else:
@@ -294,7 +294,7 @@ class ESP520Device(ESP500Device):
         return updated_instance
 
     @override
-    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs):
+    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs: Any):
         ws_type = "SET"
         ws_topic = "system/cfgimport"
         ws_data = {}
