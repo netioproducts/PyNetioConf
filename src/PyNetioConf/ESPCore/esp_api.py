@@ -4,13 +4,13 @@ This module contains functions for sending requests to the device's API on EPS b
 
 import logging
 
+# from . import ESP200Device, ESP300Device, ESP400Device, ESP500Device
+from typing import TYPE_CHECKING, Any, Optional
+
 import requests
 
 from ..exceptions import CommunicationError, InvalidParameterValueError
 from ..netio_device import NETIODevice
-# from . import ESP200Device, ESP300Device, ESP400Device, ESP500Device
-
-from typing import Any, TYPE_CHECKING, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,7 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
             response = session.post(
                 url=netio_host,
                 files={"file": ("file", file, filetype)},
-                headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
+                headers={"Content-Disposition": 'form-data; name="file"; filename="file"'},
                 timeout=timeout,
                 verify=False,
             )
@@ -248,7 +248,7 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
     logger.debug(f"File upload status: {response_status}")
 
     if response_status == "failed":
-        logger.error(f"Upload failed, logging out, retrying.")
+        logger.error("Upload failed, logging out, retrying.")
         if check_connectivity(fw_object) != -1:
             fw_object.login(fw_object.username, fw_object.password, logout=True)
         else:
@@ -284,7 +284,7 @@ def send_file(fw_object: NETIODevice, url_path: str, file, timeout: int = 600) -
                 response = session.post(
                     url=netio_host,
                     files={"file": ("file", file, filetype)},
-                    headers={"Content-Disposition": f'form-data; name="file"; filename="file"'},
+                    headers={"Content-Disposition": 'form-data; name="file"; filename="file"'},
                     timeout=timeout,
                     verify=False,
                 )
@@ -339,7 +339,7 @@ def get_file(
         raise CommunicationError("Cannot connect to device")
 
     if response == "failed":
-        logger.error(f"Request failed, logging out, retrying.")
+        logger.error("Request failed, logging out, retrying.")
         fw_object.login(fw_object.username, fw_object.password, logout=True)
         try:
             logger.debug(f"Downloading file from {netio_host}")

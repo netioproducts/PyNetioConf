@@ -2,8 +2,8 @@
 Implementation specifics for ESP devices with the firmware 4.0.x.
 """
 
-from .esp_300_device import ESP300Device
 from .. import NetioManager
+from .esp_300_device import ESP300Device
 
 
 class ESP400Device(ESP300Device):

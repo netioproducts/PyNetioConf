@@ -1,5 +1,7 @@
-from PyNetioConf import NetioManager
 import requests
+
+from PyNetioConf import NetioManager
+
 # import json # Only needed if reading MQTT configuration from a file
 
 # Create an instance of the device we want to connect to the AWS IoT cloud.
@@ -21,11 +23,11 @@ DEVICE_CERTIFICATE_PATH = "/path/to/device/cert.pem"
 # ROOT_CA_CERTIFICATE_PATH = "/path/to/root/ca.pem" # Root CA can be downloaded directly from Amazon
 
 # Upload the device key and certificate we get from the connection package
-with open(PRIVATE_KEY_PATH, "rt") as private_key:
+with open(PRIVATE_KEY_PATH) as private_key:
     key = private_key.read()
     netio_device.upload_mqtt_client_key(key)
 
-with open(DEVICE_CERTIFICATE_PATH, "rt") as device_cert:
+with open(DEVICE_CERTIFICATE_PATH) as device_cert:
     certificate = device_cert.read()
     netio_device.upload_mqtt_client_certificate(certificate)
 

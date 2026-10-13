@@ -2,8 +2,8 @@
 Implementation specifics for ESP devices with the firmware 3.x.x.
 """
 
-from .esp_200_device import ESP200Device
 from .. import NetioManager
+from .esp_200_device import ESP200Device
 
 
 class ESP300Device(ESP200Device):
