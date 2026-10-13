@@ -94,9 +94,7 @@ def _setup_ssl(**kwargs: Any) -> tuple[ssl.SSLContext, dict[str, Any]]:
                     kwargs.get("ssl_password"),
                 )
             else:
-                _ssl_context.load_cert_chain(
-                    kwargs.get("ssl_certfile"), kwargs.get("ssl_keyfile")
-                )
+                _ssl_context.load_cert_chain(kwargs.get("ssl_certfile"), kwargs.get("ssl_keyfile"))
         else:
             _ssl_context.load_cert_chain(kwargs.get("ssl_certfile"))
 
@@ -122,9 +120,7 @@ def _setup_ssl(**kwargs: Any) -> tuple[ssl.SSLContext, dict[str, Any]]:
     return (_ssl_context, ssl_options)
 
 
-def _try_connect_websocket(
-    host: str, use_https: bool, try_count: int, **kwargs: dict[str, Any]
-) -> WebSocket:
+def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs: dict[str, Any]) -> WebSocket:
     ssl_options: dict[str, Any] | None = None
     _ssl_context: ssl.SSLContext | None = None
     if use_https:
@@ -136,9 +132,7 @@ def _try_connect_websocket(
         try:
             connection_dt_start = perf_counter()
             if use_https:
-                ws = websocket.create_connection(
-                    f"wss://{host}/emweb", sslopt=ssl_options, timeout=10
-                )  # pyright: ignore[reportUnknownMemberType]
+                ws = websocket.create_connection(f"wss://{host}/emweb", sslopt=ssl_options, timeout=10)  # pyright: ignore[reportUnknownMemberType]
             else:
                 ws = websocket.create_connection(f"ws://{host}/emweb", timeout=10)  # pyright: ignore[reportUnknownMemberType]
 
@@ -148,9 +142,7 @@ def _try_connect_websocket(
             else:
                 elapsed_time = perf_counter() - connection_dt_start
                 if elapsed_time < 10:
-                    logger.debug(
-                        "Couldn't establish ws connection in time, waiting to reconnect."
-                    )
+                    logger.debug("Couldn't establish ws connection in time, waiting to reconnect.")
                     sleep(10 - elapsed_time)
         except Exception as e:
             logger.debug(f"Connection to {host} failed on {attempt + 1}/{try_count}")
@@ -205,12 +197,8 @@ def initialize_esp(
             if match:
                 version, minor, patch = match.groups()
         except KeyError:
-            logger.debug(
-                "Version not found in HELO message, fetching from system/info instead"
-            )
-            system_info = ws_api.device_init_request(
-                ws, ws_req_id, "SUBSCRIBE", host, "system/info"
-            )
+            logger.debug("Version not found in HELO message, fetching from system/info instead")
+            system_info = ws_api.device_init_request(ws, ws_req_id, "SUBSCRIBE", host, "system/info")
             ws_req_id += 2
             version_str = system_info["data"]["fwVersion"]
             version_pattern = r"(\d+)\.(\d+)\.(\d+)"
@@ -362,6 +350,4 @@ def initialize_esp(
             ws_api.close_connection(ws, graceful=False)
             raise
 
-    raise InvalidParameterValueError(
-        f"There is no firmware with major version {version} supported"
-    )
+    raise InvalidParameterValueError(f"There is no firmware with major version {version} supported")

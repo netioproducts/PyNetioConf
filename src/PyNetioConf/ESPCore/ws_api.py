@@ -58,9 +58,7 @@ def send_request(
         device.login(device.username, device.password)
 
     if device.version:
-        if (
-            device.version[0] > 5 or (device.version[0] == 5 and device.version[1] >= 4)
-        ) and ws_type == "SUBSCRIBE":
+        if (device.version[0] > 5 or (device.version[0] == 5 and device.version[1] >= 4)) and ws_type == "SUBSCRIBE":
             ws_type = "GET"
 
     request: dict[str, Any] = {"type": ws_type, "reqId": device.ws_req_id}
@@ -96,9 +94,7 @@ def send_request(
                 }
                 if ws_topic:
                     unsubscribe_request["topic"] = ws_topic
-                logger.debug(
-                    f"Sending request to {device.host} with payload {unsubscribe_request}"
-                )
+                logger.debug(f"Sending request to {device.host} with payload {unsubscribe_request}")
                 device.ws.send(json.dumps(unsubscribe_request, ensure_ascii=False))
                 sleep(
                     WS_EXECUTION_DELAY
@@ -119,9 +115,7 @@ def send_request(
                     try:
                         if message_data["reqId"] == expected_reqest_id:
                             waiting_for_reply = False
-                            logger.debug(
-                                f"Processing correct request {message_data['reqId']}"
-                            )
+                            logger.debug(f"Processing correct request {message_data['reqId']}")
                             break
                         elif message_data["reqId"] > expected_reqest_id:
                             if message_data["type"] == "PONG":
@@ -143,9 +137,7 @@ def send_request(
                                     None,
                                 )
                             if match:
-                                logger.debug(
-                                    f"Processing correct request {message_data['reqId']}"
-                                )
+                                logger.debug(f"Processing correct request {message_data['reqId']}")
                                 break
                             else:
                                 raise NotImplementedError
@@ -213,9 +205,7 @@ def _reconnect(device: NETIODevice, deadline: float, last_attempt: float | None)
             return last_attempt
         except CommunicationError:
             if perf_counter() >= deadline:
-                raise CommunicationError(
-                    f"Couldn't reconnect to {device.host} within {WS_RECONNECT_TIMEOUT} seconds."
-                )
+                raise CommunicationError(f"Couldn't reconnect to {device.host} within {WS_RECONNECT_TIMEOUT} seconds.")
             logger.debug(f"Reconnecting to {device.host} failed, retrying.")
 
 
@@ -244,9 +234,7 @@ def close_connection(ws: WebSocket | None, graceful: bool = True) -> None:
         logger.debug(f"Closing a WebSocket connection failed, dropping it: {e}")
 
 
-def _gen_file_chunks(
-    file_obj: BufferedIOBase, chunk_size: int = 2048
-) -> Generator[_FileChunk, None, None]:
+def _gen_file_chunks(file_obj: BufferedIOBase, chunk_size: int = 2048) -> Generator[_FileChunk, None, None]:
     """Reads a binary file in chunks.
 
     Yields:
@@ -380,9 +368,7 @@ def _check_auth_reply(reply: dict[str, Any], host: str) -> None:
         raise AuthError(f"Login to {host} failed with {code}: {message}")
 
 
-def login(
-    device: NETIODevice, timestamp: int, public_key: str, username: str, password: str
-) -> dict[str, Any]:
+def login(device: NETIODevice, timestamp: int, public_key: str, username: str, password: str) -> dict[str, Any]:
     salt = generate_salt()
     password_hash = generate_password_hash(username, password, public_key)
     password_token = generate_password_token(salt, password_hash)
@@ -397,16 +383,12 @@ def login(
         raise CommunicationError("No websocket connection associated with the device")
     try:
         device.ws.send(json.dumps(request, ensure_ascii=False))
-        logger.debug(
-            f"Sending authentication request to {device.host}, payload: {request}"
-        )
+        logger.debug(f"Sending authentication request to {device.host}, payload: {request}")
         device.ws_req_id += 1
         message = device.ws.recv()
     except Exception as e:
         raise CommunicationError(f"Failed to log in to {device.host}", str(e))
-    logger.debug(
-        f"Received authentication response from {device.host}, payload: {message}"
-    )
+    logger.debug(f"Received authentication response from {device.host}, payload: {message}")
     reply: dict[str, Any] = json.loads(message)
     _check_auth_reply(reply, device.host)
     return reply
@@ -474,9 +456,7 @@ def device_init_request(
             }
             if topic:
                 unsubscribe_request["topic"] = topic
-            logger.debug(
-                f"Sending request to {host} with payload {unsubscribe_request}"
-            )
+            logger.debug(f"Sending request to {host} with payload {unsubscribe_request}")
             ws.send(json.dumps(unsubscribe_request, ensure_ascii=False))
         ws_req_id += 1
         message = ws.recv()

@@ -84,14 +84,10 @@ class ESPDevice(NETIODevice):
             self.logger.debug("Logging out of the current session.")
             self.logout()
 
-        response = esp_api.send_request(
-            self, "login", {"username": username, "password": password}, timeout=10
-        )
+        response = esp_api.send_request(self, "login", {"username": username, "password": password}, timeout=10)
         if "data" in response.json():
             self.session_id = response.json()["data"]["sessionId"]
-            self.logger.debug(
-                f"Logged in to device {self.host} with session ID {self.session_id}"
-            )
+            self.logger.debug(f"Logged in to device {self.host} with session ID {self.session_id}")
         else:
             raise CommunicationError("Cannot login to device")
         # change_password and later logins use the credentials of the last login
@@ -104,9 +100,7 @@ class ESPDevice(NETIODevice):
 
     def logout(self) -> None:
         if self.session_id == "":
-            self.logger.debug(
-                f"Device {self.host} is not logged in, ignoring logout request."
-            )
+            self.logger.debug(f"Device {self.host} is not logged in, ignoring logout request.")
             pass
         esp_api.send_request(self, "logout", {})
         self.session_id = ""
@@ -115,9 +109,7 @@ class ESPDevice(NETIODevice):
     def ping(self) -> bool:
         response = esp_api.send_request(self, "ping", {})
         status = "OK" if response.status_code == 200 else response.json()
-        self.logger.debug(
-            f"Pinging device {self.host}, response: {status}. This should be empty if ok."
-        )
+        self.logger.debug(f"Pinging device {self.host}, response: {status}. This should be empty if ok.")
         if response.status_code == 200:
             return True
         else:
@@ -135,9 +127,7 @@ class ESPDevice(NETIODevice):
     # region Device Information
 
     def get_version(self) -> str:
-        response = esp_api.send_request(self, "getVersion", {}).json()["data"][
-            "version"
-        ]
+        response = esp_api.send_request(self, "getVersion", {}).json()["data"]["version"]
         response = response.split(" ")[0]
         self.logger.debug(f"Received device version: {response}")
         return response
@@ -163,16 +153,10 @@ class ESPDevice(NETIODevice):
 
     def set_output(self, output_id: int, state: bool) -> None:
         if "can_control_outputs" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to control outputs on this device."
-            )
+            raise PermissionError("You don't have permission to control outputs on this device.")
         self._check_socket_index(output_id)
-        esp_api.send_request(
-            self, "setOutputState", {"output": output_id, "value": state}
-        )
-        self.logger.debug(
-            f"Setting output {output_id} on device {self.host} to {state}."
-        )
+        esp_api.send_request(self, "setOutputState", {"output": output_id, "value": state})
+        self.logger.debug(f"Setting output {output_id} on device {self.host} to {state}.")
 
     def set_outputs_unified(self, state: bool) -> None:
         for output in range(1, self.output_count + 1):
@@ -181,9 +165,7 @@ class ESPDevice(NETIODevice):
 
     def rename_output(self, output_id: int, output_name: str) -> None:
         if "can_alter_outputs" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to alter outputs on this device."
-            )
+            raise PermissionError("You don't have permission to alter outputs on this device.")
         self._check_socket_index(output_id)
         response = esp_api.send_request(self, "getOutputDetailList")
         json_data = response.json()["data"][output_id - 1]
@@ -197,16 +179,12 @@ class ESPDevice(NETIODevice):
             "default": default,
             "powerUpInterval": pui,
         }
-        self.logger.debug(
-            f"Renaming output {output_id} to {output_name} on device {self.host}"
-        )
+        self.logger.debug(f"Renaming output {output_id} to {output_name} on device {self.host}")
         esp_api.send_request(self, "setOutputBase", request_data)
 
     def reset_output(self, output_id: int) -> None:
         if "can_control_outputs" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to control outputs on this device."
-            )
+            raise PermissionError("You don't have permission to control outputs on this device.")
         self._check_socket_index(output_id)
         esp_api.send_request(self, "resetOutputState", {"output": output_id})
         self.logger.debug(f"Resetting output {output_id} on device {self.host}.")
@@ -236,15 +214,11 @@ class ESPDevice(NETIODevice):
     def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
         raise NotImplementedError("set_output_reset_delay is not implemented for legacy ESP devices")
 
-    def set_output_schedule(
-        self, output_id: int, schedule_id: int, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule(self, output_id: int, schedule_id: int, enabled: bool | None = None) -> None:
         if enabled is None:
             enabled = True
         if "can_control_outputs" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to control outputs on this device."
-            )
+            raise PermissionError("You don't have permission to control outputs on this device.")
         self._check_socket_index(output_id)
         request_data = {
             "id": output_id,
@@ -252,9 +226,7 @@ class ESPDevice(NETIODevice):
             "enable": enabled,
         }
         esp_api.send_request(self, "setOutputSchedule", request_data)
-        self.logger.debug(
-            f"Setting schedule {schedule_id} on output {output_id}, netio_device: {self.host}."
-        )
+        self.logger.debug(f"Setting schedule {schedule_id} on output {output_id}, netio_device: {self.host}.")
 
     def get_output_schedule(self, output_id: int) -> dict[str, Any]:
         output_data = self.get_output_data(output_id)
@@ -271,13 +243,9 @@ class ESPDevice(NETIODevice):
             f"device {self.host}."
         )
         current_output_schedule = self.get_output_schedule_id(output_id)
-        self.set_output_schedule(
-            current_output_schedule, current_output_schedule, schedule_enabled
-        )
+        self.set_output_schedule(current_output_schedule, current_output_schedule, schedule_enabled)
 
-    def set_output_schedule_by_name(
-        self, output_id: int, schedule_name: str, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule_by_name(self, output_id: int, schedule_name: str, enabled: bool | None = None) -> None:
         schedule_id = self.get_schedule_id(schedule_name)
         self.set_output_schedule(output_id, schedule_id, enabled)
 
@@ -292,17 +260,13 @@ class ESPDevice(NETIODevice):
 
     def get_outputs_data(self) -> list[dict[str, Any]]:
         output_data = esp_api.send_request(self, "getOutputDetailList").json()["data"]
-        self.logger.debug(
-            f"Received output list form device {self.host}: {output_data}"
-        )
+        self.logger.debug(f"Received output list form device {self.host}: {output_data}")
         return output_data
 
     def get_output_states(self) -> list[tuple[int, bool]]:
         outputs = self.get_outputs_data()
         value_list = [(output["outputId"], output["on"]) for output in outputs]
-        self.logger.debug(
-            f"Received socket states from device {self.host}: {value_list}"
-        )
+        self.logger.debug(f"Received socket states from device {self.host}: {value_list}")
         return value_list
 
     # endregion
@@ -359,9 +323,7 @@ class ESPDevice(NETIODevice):
             "hostname": hostname,
         }
         response = esp_api.send_request(self, "setNetworkWifi", request_data)
-        self.logger.debug(
-            f"Setting static address on device {self.host} to {address}, full info: {request_data}"
-        )
+        self.logger.debug(f"Setting static address on device {self.host} to {address}, full info: {request_data}")
         if response.status_code == 200:
             self.logger.debug(f"Successfully set static address on device {self.host}")
         else:
@@ -371,9 +333,7 @@ class ESPDevice(NETIODevice):
 
     def import_config(self, file, **kwargs: Any) -> None:
         if "can_alter_settings" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to alter settings on this device."
-            )
+            raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
@@ -394,9 +354,7 @@ class ESPDevice(NETIODevice):
 
     def export_config(self, save_file: str | None = None) -> dict[str, Any]:
         response = esp_api.get_file(self, "/files/config.json")
-        self.logger.debug(
-            f"Exported configuration from device {self.host}, response: {response.json()}"
-        )
+        self.logger.debug(f"Exported configuration from device {self.host}, response: {response.json()}")
         if save_file is not None:
             with open(save_file, "w") as f:
                 f.write(response.text)
@@ -405,9 +363,7 @@ class ESPDevice(NETIODevice):
 
     def update_firmware(self, file) -> NETIODevice:
         if "can_alter_settings" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to alter settings on this device."
-            )
+            raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
@@ -415,10 +371,7 @@ class ESPDevice(NETIODevice):
         pre_reconnect_wait = 20
         if self.supported_features["wifi"] == "yes":
             wifi_settings = self.get_wifi_settings()
-            if (
-                wifi_settings["mode"] == "client"
-                and wifi_settings["client"]["status"] == "Connected"
-            ):
+            if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
                 pre_reconnect_wait = 50
 
         if esp_api.check_connectivity(self) > (pre_reconnect_wait / 10.0):
@@ -444,9 +397,7 @@ class ESPDevice(NETIODevice):
             device_response_time = esp_api.check_connectivity(self)
 
         if device_response_time == -1:
-            raise CommunicationError(
-                "Device couldn't establish connection after firmware update."
-            )
+            raise CommunicationError("Device couldn't establish connection after firmware update.")
         updated_instance = self.netio_manager.update_device(self)
 
         return updated_instance
@@ -464,16 +415,12 @@ class ESPDevice(NETIODevice):
 
     def reset_power_consumption_counters(self) -> None:
         action = "resetOutputConsumption"
-        self.logger.debug(
-            f"Resetting power consumption counters for device {self.host}"
-        )
+        self.logger.debug(f"Resetting power consumption counters for device {self.host}")
         esp_api.send_request(self, action)
 
     def reset_output_consumption_counter(self, output_id: int) -> None:
         # TODO: Implement reset_output_consumption_counter for legacy ESP devices
-        raise NotImplementedError(
-            "reset_output_consumption_counter is not implemented for legacy ESP devices"
-        )
+        raise NotImplementedError("reset_output_consumption_counter is not implemented for legacy ESP devices")
 
     def set_system_settings(
         self,
@@ -484,28 +431,16 @@ class ESPDevice(NETIODevice):
     ) -> None:
         device_system_info = esp_api.send_request(self, "getSystemInfo")
         info_json_data = device_system_info.json()["data"]
-        device_name = (
-            device_name if device_name is not None else info_json_data["deviceName"]
-        )
+        device_name = device_name if device_name is not None else info_json_data["deviceName"]
         port = port if port is not None else info_json_data["port"]
-        pr_enable = (
-            periodic_restart
-            if periodic_restart is not None
-            else info_json_data["periodicRestart"]["enable"]
-        )
-        pr_period = (
-            restart_period
-            if restart_period is not None
-            else info_json_data["periodicRestart"]["period"]
-        )
+        pr_enable = periodic_restart if periodic_restart is not None else info_json_data["periodicRestart"]["enable"]
+        pr_period = restart_period if restart_period is not None else info_json_data["periodicRestart"]["period"]
         request_data = {
             "deviceName": device_name,
             "port": port,
             "periodicRestart": {"enable": pr_enable, "period": pr_period},
         }
-        self.logger.debug(
-            f"Setting system settings on device {device_name}, host {self.host} to {request_data}"
-        )
+        self.logger.debug(f"Setting system settings on device {device_name}, host {self.host} to {request_data}")
         esp_api.send_request(self, "setSystemConfig", request_data)
 
     def rename_device(self, device_name: str) -> None:
@@ -522,9 +457,7 @@ class ESPDevice(NETIODevice):
         self.logger.debug(f"Renaming device to {device_name} on url {self.host}")
         esp_api.send_request(self, "setSystemConfig", request_data)
 
-    def set_periodic_restart(
-        self, enable: bool | None = None, restart_period: int | None = None
-    ) -> None:
+    def set_periodic_restart(self, enable: bool | None = None, restart_period: int | None = None) -> None:
         self.set_system_settings(periodic_restart=enable, restart_period=restart_period)
 
     def locate(self) -> None:
@@ -537,21 +470,15 @@ class ESPDevice(NETIODevice):
 
     def get_current_user(self) -> dict[str, Any]:
         response = esp_api.send_request(self, "getCurrentUser")
-        self.logger.debug(
-            f"Received current user information: {response.json()['data']} from device {self.host}"
-        )
+        self.logger.debug(f"Received current user information: {response.json()['data']} from device {self.host}")
         return response.json()["data"]
 
     def get_user_privileges(self, username: str) -> list[str]:
         device_users = self.get_users()
-        self.logger.debug(
-            f"Checking for user privileges of user {username} on device {self.host}"
-        )
+        self.logger.debug(f"Checking for user privileges of user {username} on device {self.host}")
         if username in device_users:
             return device_users[username]["permissions"]
-        self.logger.info(
-            f"Couldn't find the specified user {username} in the user list."
-        )
+        self.logger.info(f"Couldn't find the specified user {username} in the user list.")
         raise ElementNotFound
 
     def get_users(self) -> dict[str, Any]:
@@ -571,9 +498,7 @@ class ESPDevice(NETIODevice):
     ) -> None:
         current_user = esp_api.send_request(self, "getCurrentUser").json()
         if "can_alter_users" not in current_user["data"]["privileges"]:
-            raise PermissionError(
-                "You don't have permission to manage users on this device."
-            )
+            raise PermissionError("You don't have permission to manage users on this device.")
         request_data = {
             "username": username,
             "password": {"old": old_password, "new": new_password},
@@ -583,13 +508,9 @@ class ESPDevice(NETIODevice):
         if username == current_user["data"]["username"]:
             self.password = new_password
 
-    def create_user(
-        self, username: str, password: str, privileges: list[str] | None = None
-    ) -> None:
+    def create_user(self, username: str, password: str, privileges: list[str] | None = None) -> None:
         if "can_alter_users" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to manage users on this device."
-            )
+            raise PermissionError("You don't have permission to manage users on this device.")
         possible_priviledges = (
             "can_login",
             "can_alter_users",
@@ -605,9 +526,7 @@ class ESPDevice(NETIODevice):
             privileges = ["can_login"]
         for privilege in privileges:
             if privilege not in possible_priviledges:
-                raise ValueError(
-                    f"List of priviledges contains an invalid value: {privileges}"
-                )
+                raise ValueError(f"List of priviledges contains an invalid value: {privileges}")
         action = "addUser"
         request_data = {
             "username": username,
@@ -635,17 +554,13 @@ class ESPDevice(NETIODevice):
 
     def get_active_protocols(self) -> list[int]:
         response = esp_api.send_request(self, "getActiveProtocols")
-        self.logger.debug(
-            f"Received active protocols: {response.json()['data']['protocols']} from device {self.host}"
-        )
+        self.logger.debug(f"Received active protocols: {response.json()['data']['protocols']} from device {self.host}")
         return response.json()["data"]["protocols"]
 
     def get_supported_protocols(self) -> list[int]:
         response = esp_api.send_request(self, "getSupportedProtocols")
         protocols = response.json()["data"]["protocols"]
-        self.logger.debug(
-            f"Received supported protocols: {protocols} from device {self.host}"
-        )
+        self.logger.debug(f"Received supported protocols: {protocols} from device {self.host}")
         return protocols
 
     # region NETIO Cloud
@@ -653,37 +568,21 @@ class ESPDevice(NETIODevice):
     def set_cloud_state(self, state: bool) -> None:
         string_state = "true" if state else "false"
 
-        response = esp_api.send_request(
-            self, "setProtocol", {"id": 111, "action": "set", "enable": string_state}
-        )
-        self.logger.debug(
-            f"Setting cloud state of device {self.host} to {state}, response: {response.json()}"
-        )
+        response = esp_api.send_request(self, "setProtocol", {"id": 111, "action": "set", "enable": string_state})
+        self.logger.debug(f"Setting cloud state of device {self.host} to {state}, response: {response.json()}")
 
     def get_cloud_state(self) -> dict[str, Any]:
-        response = esp_api.send_request(
-            self, "getProtocol", {"id": 111, "action": "get"}
-        )
-        self.logger.debug(
-            f"Received cloud state: {response.json()['data']} from device {self.host}"
-        )
+        response = esp_api.send_request(self, "getProtocol", {"id": 111, "action": "get"})
+        self.logger.debug(f"Received cloud state: {response.json()['data']} from device {self.host}")
         return response.json()
 
     def set_on_premise(self, url: str) -> None:
-        response = esp_api.send_request(
-            self, "setProtocol", {"id": 111, "action": "setOnPremis", "server": url}
-        )
-        self.logger.debug(
-            f"Setting on-premise server of device {self.host} to {url}, response: {response.json()}"
-        )
+        response = esp_api.send_request(self, "setProtocol", {"id": 111, "action": "setOnPremis", "server": url})
+        self.logger.debug(f"Setting on-premise server of device {self.host} to {url}, response: {response.json()}")
 
     def register_to_cloud(self, token: str) -> None:
-        response = esp_api.send_request(
-            self, "setProtocol", {"id": 111, "action": "register", "token": token}
-        )
-        self.logger.debug(
-            f"Registering device {self.host} to cloud using token {token}, response: {response.json()}"
-        )
+        response = esp_api.send_request(self, "setProtocol", {"id": 111, "action": "register", "token": token})
+        self.logger.debug(f"Registering device {self.host} to cloud using token {token}, response: {response.json()}")
 
     # endregion
 
@@ -716,12 +615,8 @@ class ESPDevice(NETIODevice):
     # region Modbus
 
     def get_modbus_state(self) -> dict[str, Any]:
-        response = esp_api.send_request(
-            self, "getProtocol", {"id": 107, "action": "getStatus"}
-        )
-        self.logger.debug(
-            f"Received Modbus M2M state: {response.json()['data']} from device {self.host}"
-        )
+        response = esp_api.send_request(self, "getProtocol", {"id": 107, "action": "getStatus"})
+        self.logger.debug(f"Received Modbus M2M state: {response.json()['data']} from device {self.host}")
         return response.json()["data"]
 
     def set_modbus_state(
@@ -761,12 +656,8 @@ class ESPDevice(NETIODevice):
     # region JSON
 
     def get_json_api_state(self) -> dict[str, Any]:
-        response = esp_api.send_request(
-            self, "getProtocol", {"id": 104, "action": "getStatus"}
-        )
-        self.logger.debug(
-            f"Received JSON API state: {response.json()['data']} from device {self.host}"
-        )
+        response = esp_api.send_request(self, "getProtocol", {"id": 104, "action": "getStatus"})
+        self.logger.debug(f"Received JSON API state: {response.json()['data']} from device {self.host}")
         return response.json()["data"]
 
     def set_json_api_state(
@@ -817,12 +708,8 @@ class ESPDevice(NETIODevice):
         )
         if response.status_code == 200:
             ap = self.get_active_protocols()
-            if (protocol_enabled and 104 in ap) or (
-                not protocol_enabled and 104 not in ap
-            ):
-                self.logger.debug(
-                    f"Successfully set JSON API state on device {self.host}"
-                )
+            if (protocol_enabled and 104 in ap) or (not protocol_enabled and 104 not in ap):
+                self.logger.debug(f"Successfully set JSON API state on device {self.host}")
             else:
                 self.logger.debug(f"Unable to set JSON API state on device {self.host}")
 
@@ -830,13 +717,9 @@ class ESPDevice(NETIODevice):
         if 104 not in self.get_active_protocols():
             raise ProtocolNotEnabled("JSON API is not enabled on the device.")
         try:
-            response = requests.get(
-                "http://" + self.host + "/netio.json", auth=json_auth, timeout=10
-            )
+            response = requests.get("http://" + self.host + "/netio.json", auth=json_auth, timeout=10)
             if response.status_code == 200:
-                self.logger.debug(
-                    f"Received JSON information from device {self.host}: {response.json()}"
-                )
+                self.logger.debug(f"Received JSON information from device {self.host}: {response.json()}")
                 return response.json()
             else:
                 raise requests.ConnectionError
@@ -848,12 +731,8 @@ class ESPDevice(NETIODevice):
 
     def get_telnet_api_state(self) -> dict[str, Any]:
         action = "getProtocol"
-        response = esp_api.send_request(
-            self, action, {"id": 106, "action": "getStatus"}
-        )
-        self.logger.debug(
-            f"Received telnet API state: {response.json()['data']} from device {self.host}"
-        )
+        response = esp_api.send_request(self, action, {"id": 106, "action": "getStatus"})
+        self.logger.debug(f"Received telnet API state: {response.json()['data']} from device {self.host}")
         return response.json()["data"]
 
     def set_telnet_api_state(
@@ -865,63 +744,37 @@ class ESPDevice(NETIODevice):
         write_enabled: bool | None = None,
         write_auth: tuple[str, str] | None = None,
     ) -> None:
-        self._require_arguments(
-            "set_telnet_api_state", protocol_enabled=protocol_enabled
-        )
+        self._require_arguments("set_telnet_api_state", protocol_enabled=protocol_enabled)
         action = "setProtocol"
         current_state = self.get_telnet_api_state()
         request_data = {
             "enable": protocol_enabled,
             "port": port if port else current_state["port"],
             "read": {
-                "enable": read_enabled
-                if read_enabled
-                else current_state["read"]["enable"],
-                "username": read_auth[0]
-                if read_auth
-                else current_state["read"]["username"],
-                "password": read_auth[1]
-                if read_auth
-                else current_state["read"]["password"],
+                "enable": read_enabled if read_enabled else current_state["read"]["enable"],
+                "username": read_auth[0] if read_auth else current_state["read"]["username"],
+                "password": read_auth[1] if read_auth else current_state["read"]["password"],
             },
             "write": {
-                "enable": write_enabled
-                if write_enabled
-                else current_state["write"]["enable"],
-                "username": write_auth[0]
-                if write_auth
-                else current_state["write"]["username"],
-                "password": write_auth[1]
-                if write_auth
-                else current_state["write"]["password"],
+                "enable": write_enabled if write_enabled else current_state["write"]["enable"],
+                "username": write_auth[0] if write_auth else current_state["write"]["username"],
+                "password": write_auth[1] if write_auth else current_state["write"]["password"],
             },
             "id": 106,
         }
-        self.logger.debug(
-            f"Setting telnet API state on device {self.host} to new settings: {request_data}"
-        )
+        self.logger.debug(f"Setting telnet API state on device {self.host} to new settings: {request_data}")
         response = esp_api.send_request(self, action, request_data)
         if response.status_code == 200:
             ap = self.get_active_protocols()
-            if (protocol_enabled and 106 in ap) or (
-                not protocol_enabled and 106 not in ap
-            ):
-                self.logger.debug(
-                    f"Successfully set new telnet state on device {self.host}"
-                )
+            if (protocol_enabled and 106 in ap) or (not protocol_enabled and 106 not in ap):
+                self.logger.debug(f"Successfully set new telnet state on device {self.host}")
             else:
-                self.logger.debug(
-                    f"Unable to set telnet state on device {self.host}, check debug log."
-                )
+                self.logger.debug(f"Unable to set telnet state on device {self.host}, check debug log.")
 
     def get_netio_push_api_state(self) -> dict[str, Any]:
         action = "getProtocol"
-        response = esp_api.send_request(
-            self, action, {"id": 109, "action": "getStatus"}
-        )
-        self.logger.debug(
-            f"Received Netio Push API state: {response.json()['data']} from device {self.host}"
-        )
+        response = esp_api.send_request(self, action, {"id": 109, "action": "getStatus"})
+        self.logger.debug(f"Received Netio Push API state: {response.json()['data']} from device {self.host}")
         return response.json()["data"]
 
     def set_netio_push_api_state(
@@ -932,60 +785,40 @@ class ESPDevice(NETIODevice):
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
-        self._require_arguments(
-            "set_netio_push_api_state", protocol_enabled=protocol_enabled
-        )
+        self._require_arguments("set_netio_push_api_state", protocol_enabled=protocol_enabled)
         action = "setProtocol"
         current_state = self.get_netio_push_api_state()
         request_data = {
             "enable": protocol_enabled,
             "url": url if url else current_state["url"],
-            "pushProtocol": push_protocol
-            if push_protocol
-            else current_state["pushProtocol"],
+            "pushProtocol": push_protocol if push_protocol else current_state["pushProtocol"],
             "delta": delta if delta else current_state["delta"],
             "period": period if period else current_state["period"],
             "value": "current",
             "id": 109,
         }
-        self.logger.debug(
-            f"Setting Netio Push API state on device {self.host} to settings: {request_data}"
-        )
+        self.logger.debug(f"Setting Netio Push API state on device {self.host} to settings: {request_data}")
         response = esp_api.send_request(self, action, request_data)
         if response.status_code == 200:
             ap = self.get_active_protocols()
-            if (protocol_enabled and 109 in ap) or (
-                not protocol_enabled and 109 not in ap
-            ):
-                self.logger.debug(
-                    f"Successfully set new Netio Push API state on device {self.host}"
-                )
+            if (protocol_enabled and 109 in ap) or (not protocol_enabled and 109 not in ap):
+                self.logger.debug(f"Successfully set new Netio Push API state on device {self.host}")
             else:
-                self.logger.debug(
-                    f"Unable to set the Netio Push API state on device {self.host}, check debug log."
-                )
+                self.logger.debug(f"Unable to set the Netio Push API state on device {self.host}, check debug log.")
 
     def netio_push_api_push_now(self) -> None:
         action = "pushNow"
         ap = self.get_active_protocols()
         if 109 not in ap:
-            self.logger.info(
-                f"Tried to push on device with Push protocol disabled: {self.host}"
-            )
-            raise ProtocolNotEnabled(
-                f"Netio Push API is not enabled on the device. Current protocols: {ap}"
-            )
+            self.logger.info(f"Tried to push on device with Push protocol disabled: {self.host}")
+            raise ProtocolNotEnabled(f"Netio Push API is not enabled on the device. Current protocols: {ap}")
         self.logger.debug(f"Pushing Netio Push API now on device {self.host}")
         esp_api.send_request(self, action)
 
     def get_snmp_api_state(self) -> dict[str, Any]:
         action = "getProtocol"
-        response = esp_api.send_request(
-            self, action, {"id": 110, "action": "getStatus"}
-        )
-        self.logger.debug(
-            f"Received SNMP API state: {response.json()['data']} from device {self.host}"
-        )
+        response = esp_api.send_request(self, action, {"id": 110, "action": "getStatus"})
+        self.logger.debug(f"Received SNMP API state: {response.json()['data']} from device {self.host}")
         return response.json()["data"]
 
     def _set_snmp_api_state(
@@ -1010,12 +843,8 @@ class ESPDevice(NETIODevice):
                 "id": 110,
                 "version": "v1-2",
                 "location": location if location else current_state["location"],
-                "communityRead": community_read
-                if community_read
-                else current_state["communityRead"],
-                "communityWrite": community_write
-                if community_write
-                else current_state["communityWrite"],
+                "communityRead": community_read if community_read else current_state["communityRead"],
+                "communityWrite": community_write if community_write else current_state["communityWrite"],
             }
             _ = esp_api.send_request(self, action, request_data)
         elif version == "v3":
@@ -1024,46 +853,26 @@ class ESPDevice(NETIODevice):
                 "id": 110,
                 "version": "v3",
                 "location": location if location else current_state["location"],
-                "communityRead": community_read
-                if community_read
-                else current_state["communityRead"],
-                "communityWrite": community_write
-                if community_write
-                else current_state["communityWrite"],
+                "communityRead": community_read if community_read else current_state["communityRead"],
+                "communityWrite": community_write if community_write else current_state["communityWrite"],
             }
-            security_level = (
-                security_level
-                if security_level
-                else current_state["snmpV3Users"][0]["securityLevel"]
-            )
+            security_level = security_level if security_level else current_state["snmpV3Users"][0]["securityLevel"]
             user_object = {
-                "username": security_name
-                if security_name
-                else current_state["snmpV3Users"][0]["username"],
+                "username": security_name if security_name else current_state["snmpV3Users"][0]["username"],
                 "accessLevel": "rw",
                 "securityLevel": security_level,
             }
             if security_level == "authNoPriv" or security_level == "authPriv":
                 print(current_state["snmpV3Users"])
                 user_object["authAlgo"] = (
-                    auth_protocol
-                    if auth_protocol
-                    else current_state["snmpV3Users"][0]["authAlgo"]
+                    auth_protocol if auth_protocol else current_state["snmpV3Users"][0]["authAlgo"]
                 )
-                user_object["authKey"] = (
-                    auth_key if auth_key else current_state["snmpV3Users"][0]["authKey"]
-                )
+                user_object["authKey"] = auth_key if auth_key else current_state["snmpV3Users"][0]["authKey"]
             if security_level == "authPriv":
                 user_object["encryptAlgo"] = (
-                    priv_protocol
-                    if priv_protocol
-                    else current_state["snmpV3Users"][0]["encryptAlgo"]
+                    priv_protocol if priv_protocol else current_state["snmpV3Users"][0]["encryptAlgo"]
                 )
-                user_object["encryptKey"] = (
-                    priv_key
-                    if priv_key
-                    else current_state["snmpV3Users"][0]["encryptKey"]
-                )
+                user_object["encryptKey"] = priv_key if priv_key else current_state["snmpV3Users"][0]["encryptKey"]
             request_data["snmpV3Users"] = [user_object]
             _ = esp_api.send_request(self, action, request_data)
         else:
@@ -1076,17 +885,11 @@ class ESPDevice(NETIODevice):
         community_read: str | None = None,
         community_write: str | None = None,
     ) -> None:
-        self._require_arguments(
-            "set_snmp_v1_2_api_state", protocol_enabled=protocol_enabled
-        )
+        self._require_arguments("set_snmp_v1_2_api_state", protocol_enabled=protocol_enabled)
         self.logger.debug(f"Setting SNMP v1,2c API state on device {self.host}")
         if not protocol_enabled:
-            self.logger.debug(
-                "The protocol is being disabled, the device will restart."
-            )
-        self._set_snmp_api_state(
-            protocol_enabled, "v1,2c", location, community_read, community_write
-        )
+            self.logger.debug("The protocol is being disabled, the device will restart.")
+        self._set_snmp_api_state(protocol_enabled, "v1,2c", location, community_read, community_write)
 
     def set_snmp_v3_api_state(
         self,
@@ -1099,14 +902,10 @@ class ESPDevice(NETIODevice):
         priv_protocol: SnmpPrivProtocol | str | None = None,
         priv_key: str | None = None,
     ) -> None:
-        self._require_arguments(
-            "set_snmp_v3_api_state", protocol_enabled=protocol_enabled
-        )
+        self._require_arguments("set_snmp_v3_api_state", protocol_enabled=protocol_enabled)
         self.logger.debug(f"Setting SNMP v3 API state on device {self.host}")
         if not protocol_enabled:
-            self.logger.debug(
-                "The protocol is being disabled, the device will restart."
-            )
+            self.logger.debug("The protocol is being disabled, the device will restart.")
         self._set_snmp_api_state(
             protocol_enabled,
             "v3",
@@ -1162,9 +961,7 @@ class ESPDevice(NETIODevice):
         if response.status_code == 200:
             ap = self.get_active_protocols()
             if 103 in ap:
-                self.logger.debug(
-                    f"Successfully set XML API state on device {self.host}"
-                )
+                self.logger.debug(f"Successfully set XML API state on device {self.host}")
             else:
                 self.logger.debug(f"Unable to set XML API state on device {self.host}")
 
@@ -1172,13 +969,9 @@ class ESPDevice(NETIODevice):
         if 103 not in self.get_active_protocols():
             raise ProtocolNotEnabled("XML API is not enabled on the device.")
         try:
-            response = requests.get(
-                "http://" + self.host + "/netio.xml", auth=xml_auth, timeout=10
-            )
+            response = requests.get("http://" + self.host + "/netio.xml", auth=xml_auth, timeout=10)
             if response.status_code == 200:
-                self.logger.debug(
-                    f"Received XML information from device {self.host}: {response.content}"
-                )
+                self.logger.debug(f"Received XML information from device {self.host}: {response.content}")
                 return ET.fromstring(response.content)
             else:
                 self.logger.critical(f"Unable to reach host {self.host}")
@@ -1251,15 +1044,11 @@ class ESPDevice(NETIODevice):
 
     def get_watchdog_by_name(self, watchdog_name: str) -> dict[str, Any]:
         watchdogs = self.get_watchdogs()
-        self.logger.debug(
-            f"Filtering for watchdog {watchdog_name} on device {self.host}"
-        )
+        self.logger.debug(f"Filtering for watchdog {watchdog_name} on device {self.host}")
         for watchdog in watchdogs:
             if watchdog["name"] == watchdog_name:
                 return watchdog
-        self.logger.info(
-            f"Unable to find watchdog {watchdog_name} on device {self.host}"
-        )
+        self.logger.info(f"Unable to find watchdog {watchdog_name} on device {self.host}")
         raise ElementNotFound
 
     def get_schedules(self) -> list[dict[str, Any]]:
@@ -1271,15 +1060,11 @@ class ESPDevice(NETIODevice):
 
     def get_schedule_by_name(self, schedule_name: str) -> dict[str, Any]:
         scheduels = self.get_schedules()
-        self.logger.debug(
-            f"Filtering for schedule {schedule_name} on  device {self.host}"
-        )
+        self.logger.debug(f"Filtering for schedule {schedule_name} on  device {self.host}")
         for schedule in scheduels:
             if schedule["name"] == schedule_name:
                 return schedule
-        self.logger.info(
-            f"Unable to find schedule {schedule_name} on device {self.host}"
-        )
+        self.logger.info(f"Unable to find schedule {schedule_name} on device {self.host}")
         raise ElementNotFound
 
     def get_schedule_id(self, schedule_name: str) -> int:
@@ -1375,8 +1160,7 @@ class ESPDevice(NETIODevice):
     def _check_socket_index(self, socket_index: int) -> None:
         if socket_index < 1 or socket_index > self.output_count:
             raise InvalidSocketIndex(
-                f"You tried to access socket with id {socket_index},"
-                f" the device supports <1;{self.output_count}>."
+                f"You tried to access socket with id {socket_index}, the device supports <1;{self.output_count}>."
             )
 
     def _require_arguments(self, method_name: str, **arguments: Any) -> None:
@@ -1384,8 +1168,7 @@ class ESPDevice(NETIODevice):
         missing = [name for name, value in arguments.items() if value is None]
         if missing:
             raise InvalidParameterValueError(
-                f"{method_name} requires {', '.join(missing)} "
-                "on firmware older than 5.0.0"
+                f"{method_name} requires {', '.join(missing)} on firmware older than 5.0.0"
             )
 
     def _cleanup(self) -> None:
@@ -1402,41 +1185,25 @@ class ESPDevice(NETIODevice):
     # endregion
 
     def get_mqttflex_state(self) -> dict[str, Any]:
-        raise FeatureNotSupported(
-            "MQTT with certificates is only supported on firmware 5.0.0 and newer."
-        )
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
-    def set_mqttflex_state(
-        self, state: bool | None = None, config: dict | None = None
-    ) -> None:
-        raise FeatureNotSupported(
-            "MQTT with certificates is only supported on firmware 5.0.0 and newer."
-        )
+    def set_mqttflex_state(self, state: bool | None = None, config: dict | None = None) -> None:
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
-        raise FeatureNotSupported(
-            "MQTT with certificates is only supported on firmware 5.0.0 and newer."
-        )
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
     def upload_mqtt_client_certificate(self, cert: str) -> None:
-        raise FeatureNotSupported(
-            "MQTT with certificates is only supported on firmware 5.0.0 and newer."
-        )
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
     def upload_mqtt_client_key(self, key: str) -> None:
-        raise FeatureNotSupported(
-            "MQTT with certificates is only supported on firmware 5.0.0 and newer."
-        )
+        raise FeatureNotSupported("MQTT with certificates is only supported on firmware 5.0.0 and newer.")
 
     def upload_https_certificate(self, certfile: str) -> None:
-        raise FeatureNotSupported(
-            "HTTPS with certificates is only supported on firmware 5.0.0 and newer."
-        )
+        raise FeatureNotSupported("HTTPS with certificates is only supported on firmware 5.0.0 and newer.")
 
     def upload_https_private_key(self, keyfile: str) -> None:
-        raise FeatureNotSupported(
-            "HTTPS with certificates is only supported on firmware 5.0.0 and newer."
-        )
+        raise FeatureNotSupported("HTTPS with certificates is only supported on firmware 5.0.0 and newer.")
 
     @override
     def get_version_revision(self) -> str:
@@ -1476,9 +1243,7 @@ class ESPDevice(NETIODevice):
 
     @override
     def system_reset(self) -> None:
-        raise NotImplementedError(
-            "system_reset is only available for devices 5.x.x and up, please update your device."
-        )
+        raise NotImplementedError("system_reset is only available for devices 5.x.x and up, please update your device.")
 
     @override
     def load_defaults(self) -> None:

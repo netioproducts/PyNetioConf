@@ -165,9 +165,7 @@ class ESP520Device(ESP500Device):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
-        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(
-            self, "HELO"
-        )
+        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
 
     # TODO: Handle repeated code for uploading files using chunking
     @override
@@ -179,9 +177,7 @@ class ESP520Device(ESP500Device):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
         original_bytes = key.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(self, base64_string, 0, len(key), len(key), upload_id)
@@ -195,9 +191,7 @@ class ESP520Device(ESP500Device):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
         original_bytes = ca.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
         ws_api.chunk_file_upload(self, base64_string, 0, len(ca), len(ca), upload_id)
@@ -211,19 +205,13 @@ class ESP520Device(ESP500Device):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
         original_bytes = cert.encode("utf-8")
         base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(
-            self, base64_string, 0, len(cert), len(cert), upload_id
-        )
+        ws_api.chunk_file_upload(self, base64_string, 0, len(cert), len(cert), upload_id)
 
     @override
-    def update_firmware(
-        self, file: str | os.PathLike[str] | io.BufferedIOBase
-    ) -> NETIODevice:
+    def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
         if isinstance(file, (str, os.PathLike)):
             with open(file, "rb") as firmware_file:
                 return self.update_firmware(firmware_file)
@@ -246,14 +234,9 @@ class ESP520Device(ESP500Device):
         try:
             if self.supported_features["wifi"] == "yes":
                 wifi_settings = self.get_wifi_settings()
-                if (
-                    wifi_settings["mode"] == "client"
-                    and wifi_settings["client"]["status"] == "Connected"
-                ):
+                if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
                     pre_reconnect_wait = 50
-                    self.logger.debug(
-                        "Increased wait time after fimrware update due to active Wi-Fi connection."
-                    )
+                    self.logger.debug("Increased wait time after fimrware update due to active Wi-Fi connection.")
         except KeyError:
             pre_reconnect_wait = 100
 
@@ -268,18 +251,14 @@ class ESP520Device(ESP500Device):
             ws_type = "SET"
             ws_topic = "system/fwupdate"
             ws_data = {}
-            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-                "uploadId"
-            ]
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
 
             ws_api.upload_file(self, file, upload_id)
         except CommunicationError:
             self.logger.warning(
                 f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
             )
-        self.logger.debug(
-            f"Uploaded firmware, device {self.host} might be unresponsive for a while."
-        )
+        self.logger.debug(f"Uploaded firmware, device {self.host} might be unresponsive for a while.")
 
         # TODO: Sophisticated
         pre_reconnect_wait = 30
@@ -315,9 +294,7 @@ class ESP520Device(ESP500Device):
         return updated_instance
 
     @override
-    def import_config(
-        self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs
-    ):
+    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs):
         ws_type = "SET"
         ws_topic = "system/cfgimport"
         ws_data = {}
@@ -328,14 +305,10 @@ class ESP520Device(ESP500Device):
         if isinstance(file, io.TextIOBase):
             file = io.BytesIO(file.read().encode("utf-8"))
         if not isinstance(file, io.BufferedIOBase):
-            raise TypeError(
-                f"Unsupported file type {type(file).__name__}, expected a path or a file object."
-            )
+            raise TypeError(f"Unsupported file type {type(file).__name__}, expected a path or a file object.")
 
         self.logger.debug(f"Importing configuration to host {self.host}")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
         ws_api.upload_file(self, file, upload_id)
 
     @override
@@ -344,9 +317,7 @@ class ESP520Device(ESP500Device):
         start_time = time()
         ws_api.send_request(self, ws_type)
         end_time = time()
-        self.logger.debug(
-            f"Pinging device {self.host} successful. Response time: {end_time - start_time}"
-        )
+        self.logger.debug(f"Pinging device {self.host} successful. Response time: {end_time - start_time}")
         return True
 
     @override
@@ -371,12 +342,8 @@ class ESP520Device(ESP500Device):
         config_export: dict[str, Any] = dict()
 
         for config_group in ws_export_topics_list:
-            self.logger.debug(
-                f"Exporting configuration for {config_group.split('/')[-1]} from device {self.host}"
-            )
-            group_data = ws_api.send_request(self, ws_type, config_group, ws_data).get(
-                "data", {}
-            )
+            self.logger.debug(f"Exporting configuration for {config_group.split('/')[-1]} from device {self.host}")
+            group_data = ws_api.send_request(self, ws_type, config_group, ws_data).get("data", {})
             config_export |= {config_group.split("/")[-1]: group_data}
         if save_file is not None:
             file_path = Path(save_file)

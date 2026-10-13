@@ -148,9 +148,7 @@ class NetioManager:
         from urllib3.exceptions import MaxRetryError
 
         try:
-            response = session.post(
-                f"http://{host}/api", json=json_payload, timeout=300
-            )  # noqa
+            response = session.post(f"http://{host}/api", json=json_payload, timeout=300)  # noqa
         except MaxRetryError:
             from time import sleep
 

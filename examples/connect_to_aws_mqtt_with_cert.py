@@ -46,40 +46,30 @@ MQTT_BROKER = "mqtt.broker.address.com"
 # Please make sure that your configuration is valid, and that the clientid and topics match your policies
 # if you have any policies active on AWS.
 device_config = {
-  "broker": {
-    "clientid": "netio${DEVICE_SN}",
-    "keepalive": 30,
-    "password": "",
-    "port": 8883,
-    "protocol": "mqtt",
-    "ssl": True,
-    "type": "generic",
-    "url": MQTT_BROKER,
-    "username": "",
-    "clientcert": True
-  },
-  "publish": [
-    {
-      "events": [
+    "broker": {
+        "clientid": "netio${DEVICE_SN}",
+        "keepalive": 30,
+        "password": "",
+        "port": 8883,
+        "protocol": "mqtt",
+        "ssl": True,
+        "type": "generic",
+        "url": MQTT_BROKER,
+        "username": "",
+        "clientcert": True,
+    },
+    "publish": [
         {
-          "source": "OUTPUTS/1/STATE",
-          "type": "change"
+            "events": [{"source": "OUTPUTS/1/STATE", "type": "change"}],
+            "payload": "${INOUT_STATUS}",
+            "qos": 0,
+            "retain": False,
+            "topic": "devices/${DEVICE_NAME}/messages/devicebound/",
         }
-      ],
-      "payload": "${INOUT_STATUS}",
-      "qos": 0,
-      "retain": False,
-      "topic": "devices/${DEVICE_NAME}/messages/devicebound/"
-    }
-  ],
-  "subscribe": [
-    {
-      "action": "${payload}",
-      "qos": 0,
-      "target": "REST_JSON",
-      "topic": "devices/${DEVICE_NAME}/messages/events/"
-    }
-  ]
+    ],
+    "subscribe": [
+        {"action": "${payload}", "qos": 0, "target": "REST_JSON", "topic": "devices/${DEVICE_NAME}/messages/events/"}
+    ],
 }
 
 # Now we upload the config to the device and enable the MQTT protocol

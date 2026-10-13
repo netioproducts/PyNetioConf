@@ -177,6 +177,4 @@ class ESP540Device(ESP520Device):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
-        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(
-            self, "HELO"
-        )
+        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")

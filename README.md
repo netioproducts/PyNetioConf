@@ -71,7 +71,7 @@ installers will prefer it, and betas will need to be requested explicitly with
 from PyNetioConf import NetioManager
 
 nm = NetioManager()
-# The NetioManager instance handles all the devices and their sessions, preventing any session crowding and 
+# The NetioManager instance handles all the devices and their sessions, preventing any session crowding and
 # collisions in case of multiple device instances
 
 device = nm.init_device("powerpdu-8qs.netio-products.com", "demo", "demo")

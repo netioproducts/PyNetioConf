@@ -83,9 +83,7 @@ def _choice_value(choices: type[StrEnum], value: str | None, name: str) -> str |
         ) from None
 
 
-def _auth_or_current(
-    auth: tuple[str, str] | None, current: dict[str, Any], prefix: str
-) -> tuple[str, str]:
+def _auth_or_current(auth: tuple[str, str] | None, current: dict[str, Any], prefix: str) -> tuple[str, str]:
     """Returns auth, or the device's current (username, password) when auth is None."""
     if auth is not None:
         return auth
@@ -225,9 +223,7 @@ class ESP500Device(NETIODevice):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
-        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(
-            self, "HELO"
-        )
+        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
 
     def _keep_alive(self) -> None:
         self.logger.debug(
@@ -252,13 +248,9 @@ class ESP500Device(NETIODevice):
                 if self._ka_thread:
                     self._ka_thread.cancel()
                     self._ka_thread.join()
-                    self.logger.debug(
-                        "Disabled keep-alive thread due to new login process."
-                    )
+                    self.logger.debug("Disabled keep-alive thread due to new login process.")
 
-                self.logger.debug(
-                    f"{self.host} websocket connection attempt {attempt + 1}/{try_count}"
-                )
+                self.logger.debug(f"{self.host} websocket connection attempt {attempt + 1}/{try_count}")
                 try:
                     if self.use_https:
                         self.ws = websocket.create_connection(
@@ -267,13 +259,9 @@ class ESP500Device(NETIODevice):
                             timeout=10,
                         )  # pyright: ignore[reportUnknownMemberType]
                     else:
-                        self.ws = websocket.create_connection(
-                            f"ws://{self.host}/emweb", timeout=10
-                        )  # pyright: ignore[reportUnknownMemberType]
+                        self.ws = websocket.create_connection(f"ws://{self.host}/emweb", timeout=10)  # pyright: ignore[reportUnknownMemberType]
                 except Exception:
-                    self.logger.debug(
-                        f"Connection to {self.host} failed on {attempt + 1}/{try_count}"
-                    )
+                    self.logger.debug(f"Connection to {self.host} failed on {attempt + 1}/{try_count}")
                     sleep(1)
                     continue
 
@@ -283,9 +271,7 @@ class ESP500Device(NETIODevice):
                 reconnected = True
 
             try:
-                hello_response = ws_api.device_init_request(
-                    self.ws, self.ws_req_id, "HELO", self.host
-                )
+                hello_response = ws_api.device_init_request(self.ws, self.ws_req_id, "HELO", self.host)
                 self.ws_req_id += 1
                 ws_api.login(
                     self,
@@ -295,9 +281,7 @@ class ESP500Device(NETIODevice):
                     password,
                 )
             except CommunicationError:
-                self.logger.debug(
-                    f"Login to {self.host} failed on {attempt + 1}/{try_count}"
-                )
+                self.logger.debug(f"Login to {self.host} failed on {attempt + 1}/{try_count}")
                 # The next attempt opens a new connection, the device would keep a session for this one
                 ws_api.close_connection(self.ws, graceful=False)
                 self.ws = None
@@ -330,9 +314,7 @@ class ESP500Device(NETIODevice):
 
             return "TODO: Authenticate Session ID on 5.x.x"
 
-        raise CommunicationError(
-            f"Couldn't log in to device {self.host} after {try_count} attempts."
-        )
+        raise CommunicationError(f"Couldn't log in to device {self.host} after {try_count} attempts.")
 
     @override
     def logout(self) -> None:
@@ -348,9 +330,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_current_user(self) -> dict[str, Any]:
-        self.logger.debug(
-            f"Fetching current user ({self.username}) data from device {self.host}"
-        )
+        self.logger.debug(f"Fetching current user ({self.username}) data from device {self.host}")
         ws_type = "SUBSCRIBE"
         ws_topic = f"users/name/{self.username}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
@@ -358,9 +338,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_user_privileges(self, username: str) -> list[str]:
-        self.logger.debug(
-            f"Fetching privileges for user {username} on device {self.host}"
-        )
+        self.logger.debug(f"Fetching privileges for user {username} on device {self.host}")
         ws_type = "SUBSCRIBE"
         ws_topic = f"users/name/{username}/config"
         self._require_user(username)
@@ -382,9 +360,7 @@ class ESP500Device(NETIODevice):
         return {item["name"]: item for item in items if "name" in item}
 
     @override
-    def create_user(
-        self, username: str, password: str, privileges: list[str] | None = None
-    ) -> None:
+    def create_user(self, username: str, password: str, privileges: list[str] | None = None) -> None:
         self.logger.debug(f"Creating user {username} on device {self.host}")
         if privileges is None or len(privileges) == 0:
             privileges = ["can_login"]
@@ -478,9 +454,7 @@ class ESP500Device(NETIODevice):
     def get_output_data(self, output_id: int) -> dict[str, Any]:
         ws_type = "SUBSCRIBE"
         ws_topic = f"outputs/id/{output_id}/config"
-        self.logger.debug(
-            f"Fetching output configuration data for output id {output_id} on {self.host}"
-        )
+        self.logger.debug(f"Fetching output configuration data for output id {output_id} on {self.host}")
         response = ws_api.send_request(self, ws_type, ws_topic)
         return response.get("data", {})
 
@@ -498,18 +472,12 @@ class ESP500Device(NETIODevice):
         ws_topic = f"outputs/id/{output_id}/config"
 
         self.logger.debug(f"Setting output {output_id} config on device {self.host}")
-        current = self._require_config(
-            self.get_output_data(output_id), f"output {output_id}"
-        )
+        current = self._require_config(self.get_output_data(output_id), f"output {output_id}")
         ws_data = {
             "default": _value_or_current(default_state, current, "default"),
-            "isScheduleActive": _value_or_current(
-                is_schedule_active, current, "isScheduleActive"
-            ),
+            "isScheduleActive": _value_or_current(is_schedule_active, current, "isScheduleActive"),
             "name": _value_or_current(output_name, current, "name"),
-            "powerUpInterval": _value_or_current(
-                power_up_interval, current, "powerUpInterval"
-            ),
+            "powerUpInterval": _value_or_current(power_up_interval, current, "powerUpInterval"),
             "resetDelay": _value_or_current(reset_delay, current, "resetDelay"),
             "scheduleId": _value_or_current(schedule_id, current, "scheduleId"),
         }
@@ -556,14 +524,9 @@ class ESP500Device(NETIODevice):
         self._check_privileges(privileges)
         return {privilege: privilege in privileges for privilege in USER_PRIVILEGES}
 
-    def _require_config(
-        self, current: dict[str, Any], config_name: str
-    ) -> dict[str, Any]:
+    def _require_config(self, current: dict[str, Any], config_name: str) -> dict[str, Any]:
         if not current:
-            message = (
-                f"Device {self.host} returned no {config_name} configuration, "
-                "settings were left unchanged"
-            )
+            message = f"Device {self.host} returned no {config_name} configuration, settings were left unchanged"
             self.logger.error(message)
             raise CommunicationError(message)
         return current
@@ -571,8 +534,7 @@ class ESP500Device(NETIODevice):
     def _check_socket_index(self, socket_index: int) -> None:
         if socket_index < 1 or socket_index > self.output_count:
             raise InvalidSocketIndex(
-                f"You tried to access socket with id {socket_index},"
-                f" the device supports <1;{self.output_count}>."
+                f"You tried to access socket with id {socket_index}, the device supports <1;{self.output_count}>."
             )
 
     @override
@@ -593,9 +555,7 @@ class ESP500Device(NETIODevice):
         ws_data = {"request": request.value}
 
         self._check_socket_index(output_id)
-        self.logger.debug(
-            f"Setting output {output_id} to {request.name} on device {self.host}"
-        )
+        self.logger.debug(f"Setting output {output_id} to {request.name} on device {self.host}")
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
@@ -626,9 +586,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def set_outputs_unified(self, state: bool) -> None:
-        self.logger.debug(
-            f"Setting all outputs unified to {state} on device {self.host}"
-        )
+        self.logger.debug(f"Setting all outputs unified to {state} on device {self.host}")
         for output in range(1, self.output_count + 1):
             self.set_output(output, state)
 
@@ -644,9 +602,7 @@ class ESP500Device(NETIODevice):
         ws_data = {"request": True}
 
         self._check_socket_index(output_id)
-        self.logger.debug(
-            f"Resetting power consumption counters for output {output_id} on device {self.host}"
-        )
+        self.logger.debug(f"Resetting power consumption counters for output {output_id} on device {self.host}")
         ws_api.send_request(
             self,
             ws_type,
@@ -656,18 +612,14 @@ class ESP500Device(NETIODevice):
 
     @override
     def reset_power_consumption_counters(self) -> None:
-        self.logger.debug(
-            f"Resetting power consumption counters for all outputs on device {self.host}"
-        )
+        self.logger.debug(f"Resetting power consumption counters for all outputs on device {self.host}")
         for output in range(1, self.output_count + 1):
             self.reset_output_consumption_counter(output)
             sleep(0.1)
 
     @override
     def get_output_schedule(self, output_id: int) -> dict[str, Any]:
-        self.logger.debug(
-            f"Fetching output {output_id} schedule from device {self.host}"
-        )
+        self.logger.debug(f"Fetching output {output_id} schedule from device {self.host}")
         output_data = self.get_output_data(output_id)
         return {
             "id": output_data.get("scheduleId", 0),
@@ -676,42 +628,28 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_output_schedule_id(self, output_id: int) -> int:
-        self.logger.debug(
-            f"Fetching output {output_id} schedule ID from device {self.host}"
-        )
+        self.logger.debug(f"Fetching output {output_id} schedule ID from device {self.host}")
         return int(self.get_output_schedule(output_id)["id"])
 
     @override
-    def set_output_schedule(
-        self, output_id: int, schedule_id: int, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule(self, output_id: int, schedule_id: int, enabled: bool | None = None) -> None:
         self.logger.debug(
             f"Setting output {output_id} schedule to schedule ID {schedule_id} (active={enabled}) on {self.host}"
         )
-        self._set_output_config(
-            output_id, schedule_id=schedule_id, is_schedule_active=enabled
-        )
+        self._set_output_config(output_id, schedule_id=schedule_id, is_schedule_active=enabled)
 
     @override
     def set_output_schedule_state(self, output_id: int, schedule_enabled: bool) -> None:
-        self.logger.debug(
-            f"Setting output {output_id} schedule state to {schedule_enabled} on {self.host}"
-        )
+        self.logger.debug(f"Setting output {output_id} schedule state to {schedule_enabled} on {self.host}")
         self._set_output_config(output_id, is_schedule_active=schedule_enabled)
 
     @override
-    def set_output_schedule_by_name(
-        self, output_id: int, schedule_name: str, enabled: bool | None = None
-    ) -> None:
-        self.logger.debug(
-            f"Setting output {output_id} schedule to '{schedule_name}' on {self.host}"
-        )
+    def set_output_schedule_by_name(self, output_id: int, schedule_name: str, enabled: bool | None = None) -> None:
+        self.logger.debug(f"Setting output {output_id} schedule to '{schedule_name}' on {self.host}")
         schedule_id = self.get_schedule_id(schedule_name)
         self.set_output_schedule(output_id, schedule_id, enabled)
 
-    def _create_configurable_block(
-        self, enable: bool, name: str, config: dict[str, Any], topic: str
-    ) -> None:
+    def _create_configurable_block(self, enable: bool, name: str, config: dict[str, Any], topic: str) -> None:
         ws_type = "SET"
 
         self.logger.debug(f"Creating '{name}' via {topic} on device {self.host}")
@@ -814,9 +752,7 @@ class ESP500Device(NETIODevice):
             raise
         except ElementNotFound:
             pass
-        self.logger.debug(
-            f"Attempting to create watchdog {name} on device {self.host}."
-        )
+        self.logger.debug(f"Attempting to create watchdog {name} on device {self.host}.")
         self.logger.debug(f"Watchdog configuration: {json.dumps(config)}")
         self._create_configurable_block(enable, name, config, topic)
 
@@ -830,17 +766,13 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_watchdog_by_name(self, watchdog_name: str) -> dict[str, Any]:
-        self.logger.debug(
-            f"Filtering for watchdog {watchdog_name} on device {self.host}"
-        )
+        self.logger.debug(f"Filtering for watchdog {watchdog_name} on device {self.host}")
         ws_type = "SUBSCRIBE"
         ws_topic = f"wdtpingers/name/{watchdog_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
         data = response.get("data")
         if not data:
-            raise ElementNotFound(
-                f"Watchdog {watchdog_name} not found on device {self.host}"
-            )
+            raise ElementNotFound(f"Watchdog {watchdog_name} not found on device {self.host}")
         return data
 
     @override
@@ -867,9 +799,7 @@ class ESP500Device(NETIODevice):
             raise
         except ElementNotFound:
             pass
-        self.logger.debug(
-            f"Attempting to create schedule {name} on device {self.host}."
-        )
+        self.logger.debug(f"Attempting to create schedule {name} on device {self.host}.")
         self.logger.debug(f"Schedule configuration: {intervals}")
         ws_api.send_request(self, ws_type, topic, ws_data)
 
@@ -883,31 +813,23 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_schedule_by_name(self, schedule_name: str) -> dict[str, Any]:
-        self.logger.debug(
-            f"Filtering for schedule {schedule_name} on device {self.host}"
-        )
+        self.logger.debug(f"Filtering for schedule {schedule_name} on device {self.host}")
         ws_type = "SUBSCRIBE"
         ws_topic = f"schedules/name/{schedule_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
         data = response.get("data")
         if not data:
-            raise ElementNotFound(
-                f"Schedule {schedule_name} not found on device {self.host}"
-            )
+            raise ElementNotFound(f"Schedule {schedule_name} not found on device {self.host}")
         return data
 
     @override
     def get_schedule_id(self, schedule_name: str) -> int:
-        self.logger.debug(
-            f"Fetching ID of schedule {schedule_name} from device {self.host}"
-        )
+        self.logger.debug(f"Fetching ID of schedule {schedule_name} from device {self.host}")
         schedules = self.get_schedules()
         for schedule in schedules:
             if schedule.get("name") == schedule_name:
                 return int(schedule["id"])
-        raise ElementNotFound(
-            f"Schedule {schedule_name} not found on device {self.host}"
-        )
+        raise ElementNotFound(f"Schedule {schedule_name} not found on device {self.host}")
 
     @override
     def get_schedule_names(self) -> list[str]:
@@ -932,9 +854,7 @@ class ESP500Device(NETIODevice):
                 break
 
         if not schedule_name:
-            raise ElementNotFound(
-                f"Schedule with ID {schedule_id} not found on device {self.host}"
-            )
+            raise ElementNotFound(f"Schedule with ID {schedule_id} not found on device {self.host}")
 
         self.delete_schedule_by_name(schedule_name)
 
@@ -944,16 +864,12 @@ class ESP500Device(NETIODevice):
         try:
             self.get_schedule_by_name(schedule_name)
         except ElementNotFound:
-            raise ElementNotFound(
-                f"Schedule {schedule_name} not found on device {self.host}"
-            )
+            raise ElementNotFound(f"Schedule {schedule_name} not found on device {self.host}")
 
         topic = "schedules/delete"
         ws_type = "SET"
         ws_data = {"name": schedule_name}
-        self.logger.debug(
-            f"Attempting to delete schedule {schedule_name} on device {self.host}."
-        )
+        self.logger.debug(f"Attempting to delete schedule {schedule_name} on device {self.host}.")
         ws_api.send_request(self, ws_type, topic, ws_data)
 
     def delete_rule_by_name(self, name: str) -> None:
@@ -1058,9 +974,7 @@ class ESP500Device(NETIODevice):
             "readOnlyEnable": _value_or_current(read_enable, current, "readOnlyEnable"),
             "readUsername": read_username,
             "readPassword": read_password,
-            "readWriteEnable": _value_or_current(
-                write_enable, current, "readWriteEnable"
-            ),
+            "readWriteEnable": _value_or_current(write_enable, current, "readWriteEnable"),
             "writeUsername": write_username,
             "writePassword": write_password,
         }
@@ -1112,14 +1026,10 @@ class ESP500Device(NETIODevice):
         protocol_data = {
             "enable": _value_or_current(protocol_enabled, current, "enable"),
             "port": _value_or_current(port, current, "port"),
-            "readOnlyEnable": _value_or_current(
-                read_enabled, current, "readOnlyEnable"
-            ),
+            "readOnlyEnable": _value_or_current(read_enabled, current, "readOnlyEnable"),
             "readUsername": read_username,
             "readPassword": read_password,
-            "readWriteEnable": _value_or_current(
-                write_enabled, current, "readWriteEnable"
-            ),
+            "readWriteEnable": _value_or_current(write_enabled, current, "readWriteEnable"),
             "writeUsername": write_username,
             "writePassword": write_password,
         }
@@ -1151,9 +1061,7 @@ class ESP500Device(NETIODevice):
             "enable": _value_or_current(protocol_enabled, current, "enable"),
             "port": _value_or_current(port, current, "port"),
             "lastIp": current["lastIp"],
-            "ipFilterEnable": _value_or_current(
-                ip_filter_enabled, current, "ipFilterEnable"
-            ),
+            "ipFilterEnable": _value_or_current(ip_filter_enabled, current, "ipFilterEnable"),
             "ipFrom": _value_or_current(ip_from, current, "ipFrom"),
             "ipTo": _value_or_current(ip_to, current, "ipTo"),
         }
@@ -1182,9 +1090,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Setting Netio Push API state on device {self.host}")
         if push_protocol is not None:
             push_protocol = _choice_value(PushProtocol, push_protocol.upper(), "push_protocol")
-        current = self._require_config(
-            self.get_netio_push_api_state(), "Netio Push API"
-        )
+        current = self._require_config(self.get_netio_push_api_state(), "Netio Push API")
         protocol_data: dict[str, Any] = {
             "enable": _value_or_current(protocol_enabled, current, "enable"),
             "url": _value_or_current(url, current, "url"),
@@ -1229,21 +1135,15 @@ class ESP500Device(NETIODevice):
         request_data = {
             "enable": _value_or_current(protocol_enabled, current, "enable"),
             "location": _value_or_current(location, current, "location"),
-            "communityRead": _value_or_current(
-                community_read, current, "communityRead"
-            ),
-            "communityWrite": _value_or_current(
-                community_write, current, "communityWrite"
-            ),
+            "communityRead": _value_or_current(community_read, current, "communityRead"),
+            "communityWrite": _value_or_current(community_write, current, "communityWrite"),
             "version": ver,
             "securityName": _value_or_current(security_name, current, "securityName"),
             "authAlgo": _value_or_current(auth_protocol, current, "authAlgo"),
             "authKey": _value_or_current(auth_key, current, "authKey"),
             "encryptAlgo": _value_or_current(priv_protocol, current, "encryptAlgo"),
             "encryptKey": _value_or_current(priv_key, current, "encryptKey"),
-            "securityLevel": _value_or_current(
-                security_level, current, "securityLevel"
-            ),
+            "securityLevel": _value_or_current(security_level, current, "securityLevel"),
         }
 
         _ = ws_api.send_request(self, ws_type, ws_topic, request_data)
@@ -1310,17 +1210,12 @@ class ESP500Device(NETIODevice):
             "readOnlyEnable": _value_or_current(read_enable, current, "readOnlyEnable"),
             "readUsername": read_username,
             "readPassword": read_password,
-            "readWriteEnable": _value_or_current(
-                write_enable, current, "readWriteEnable"
-            ),
+            "readWriteEnable": _value_or_current(write_enable, current, "readWriteEnable"),
             "writeUsername": write_username,
             "writePassword": write_password,
         }
         self.logger.debug(f"Setting json api state on device {self.host}.")
-        logged_data = {
-            key: "***" if "Password" in key else value
-            for key, value in protocol_data.items()
-        }
+        logged_data = {key: "***" if "Password" in key else value for key, value in protocol_data.items()}
         self.logger.debug(f"JSON configuration: {json.dumps(logged_data, indent=4)}")
         _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
@@ -1364,9 +1259,7 @@ class ESP500Device(NETIODevice):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
-        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadPath"
-        ]
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         _ = esp_api.send_file(self, upload_path, key)
         sleep(0.1)
 
@@ -1376,9 +1269,7 @@ class ESP500Device(NETIODevice):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
-        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadPath"
-        ]
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         _ = esp_api.send_file(self, upload_path, cert)
         sleep(0.1)
 
@@ -1388,9 +1279,7 @@ class ESP500Device(NETIODevice):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
-        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadPath"
-        ]
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         _ = esp_api.send_file(self, upload_path, ca)
         sleep(0.1)
 
@@ -1415,9 +1304,7 @@ class ESP500Device(NETIODevice):
         output_data = self.get_outputs_data()
         output_states = []
         for output in output_data:
-            output_states.append(
-                (int(output["id"]), True if output["state"] == "on" else False)
-            )
+            output_states.append((int(output["id"]), True if output["state"] == "on" else False))
         return output_states
 
     @override
@@ -1425,9 +1312,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Fetching output {output_id} state from device {self.host}")
         return self.get_output_states()[output_id - 1][1]  # TODO: Polish
 
-    def set_mqttflex_state(
-        self, state: bool | None = None, config: dict[str, Any] | None = None
-    ) -> None:
+    def set_mqttflex_state(self, state: bool | None = None, config: dict[str, Any] | None = None) -> None:
         ws_type = "SET"
         ws_topic = "protocols/mqtt/config"
 
@@ -1445,9 +1330,7 @@ class ESP500Device(NETIODevice):
         topic = "system/srvkeyupload"
         ws_type = "SET"
         ws_data: dict[str, Any] = {}
-        self.logger.debug(
-            f"Uploading https private key for https to device {self.host}."
-        )
+        self.logger.debug(f"Uploading https private key for https to device {self.host}.")
         with open(keyfile, "rb") as f:
             endpoint_data = ws_api.send_request(self, ws_type, topic, ws_data)
             endpoint = endpoint_data["data"]["uploadPath"]
@@ -1481,9 +1364,7 @@ class ESP500Device(NETIODevice):
         ws_data: dict[str, Any] = {}
 
         if "can_alter_settings" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to alter settings on this device."
-            )
+            raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
@@ -1506,9 +1387,7 @@ class ESP500Device(NETIODevice):
     @override
     def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
         if "can_alter_settings" not in self.user_permissions:
-            raise PermissionError(
-                "You don't have permission to alter settings on this device."
-            )
+            raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
@@ -1516,20 +1395,13 @@ class ESP500Device(NETIODevice):
         pre_reconnect_wait = 20
         if self.supported_features["wifi"] == "yes":
             wifi_settings = self.get_wifi_settings()
-            if (
-                wifi_settings["mode"] == "client"
-                and wifi_settings["client"]["status"] == "Connected"
-            ):
+            if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
                 pre_reconnect_wait = 50
-                self.logger.debug(
-                    "Increased wait time after fimrware update due to active Wi-Fi connection."
-                )
+                self.logger.debug("Increased wait time after fimrware update due to active Wi-Fi connection.")
 
         if esp_api.check_connectivity(self) > (pre_reconnect_wait / 10.0):
             pre_reconnect_wait = pre_reconnect_wait * 2
-            self.logger.debug(
-                "Increased wait time after firmware update due to poor connection quality."
-            )
+            self.logger.debug("Increased wait time after firmware update due to poor connection quality.")
 
         _ = esp_api.send_request(self, "prepFwUpgrade")
         _ = esp_api.send_file(self, "/upload/firmware", file)
@@ -1554,9 +1426,7 @@ class ESP500Device(NETIODevice):
             device_response_time = esp_api.check_connectivity(self)
 
         if device_response_time == -1:
-            raise CommunicationError(
-                "Device couldn't establish connection after firmware update."
-            )
+            raise CommunicationError("Device couldn't establish connection after firmware update.")
 
         updated_instance = None
         if isinstance(self.netio_manager, NetioManager):
@@ -1573,9 +1443,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def ping(self) -> bool:
-        self.logger.warning(
-            "Device pinging is not supported on 5.0.x to 5.1.x, please update your device."
-        )
+        self.logger.warning("Device pinging is not supported on 5.0.x to 5.1.x, please update your device.")
         return True
 
     @override
@@ -1585,9 +1453,7 @@ class ESP500Device(NETIODevice):
         ws_data = None
         self.logger.debug(f"Fetching system log messages from device {self.host}.")
 
-        log_messages: list[dict[str, Any]] = ws_api.send_request(
-            self, ws_type, ws_topic, ws_data
-        )["data"]
+        log_messages: list[dict[str, Any]] = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]
         return log_messages
 
     @override
@@ -1629,17 +1495,14 @@ class ESP500Device(NETIODevice):
                 "on 5.0.0+ firmware and was not changed, use rename_device to change it"
             )
         netwifi_res = ws_api.send_request(self, ws_type, ws_topic)
-        netwifi_data = self._require_config(
-            netwifi_res.get("data", {}), "Wi-Fi network"
-        )
+        netwifi_data = self._require_config(netwifi_res.get("data", {}), "Wi-Fi network")
         if netwifi_data["networkMode"] != "static" and None in (
             address,
             net_mask,
             gateway,
         ):
             raise InvalidParameterValueError(
-                "address, net_mask and gateway are required when switching Wi-Fi "
-                "from DHCP to a static address"
+                "address, net_mask and gateway are required when switching Wi-Fi from DHCP to a static address"
             )
         netwifi_data["networkMode"] = "static"
         if address is not None:
@@ -1660,9 +1523,7 @@ class ESP500Device(NETIODevice):
         return self.get_system_info()["fwRevision"]
 
     @override
-    def set_periodic_restart(
-        self, enable: bool | None = None, restart_period: int | None = None
-    ) -> None:
+    def set_periodic_restart(self, enable: bool | None = None, restart_period: int | None = None) -> None:
         self.logger.debug(f"Setting periodic restart on device {self.host}")
         self.set_system_settings(periodic_restart=enable, restart_period=restart_period)
 
@@ -1720,23 +1581,17 @@ class ESP500Device(NETIODevice):
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
-    def change_user_password(
-        self, username: str, old_password: str, new_password: str
-    ) -> None:
+    def change_user_password(self, username: str, old_password: str, new_password: str) -> None:
         ws_type = "SUBSCRIBE"
         ws_topic = f"users/name/{username}/config"
 
-        self.logger.debug(
-            f"Changing password for user {username} on device {self.host}"
-        )
+        self.logger.debug(f"Changing password for user {username} on device {self.host}")
         self._require_user(username)
         user_cfg_res = ws_api.send_request(self, ws_type, ws_topic)
         user_data = user_cfg_res["data"]
         hello_response = ws_api.send_request(self, "HELO")
         public_key = hello_response["data"]["publicKey"]
-        password_hash = ws_api.generate_password_hash(
-            username, new_password, public_key
-        )
+        password_hash = ws_api.generate_password_hash(username, new_password, public_key)
         user_data["passwordHash"] = password_hash
         user_data["password"] = ""
 
@@ -1778,9 +1633,7 @@ class ESP500Device(NETIODevice):
         ws_topic = "protocols/cloud/cmd"
         ws_data = {"action": "register", "token": token, "server": ""}
 
-        self.logger.debug(
-            f"Registering to cloud with token {token} on device {self.host}"
-        )
+        self.logger.debug(f"Registering to cloud with token {token} on device {self.host}")
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
         sleep(CLOUD_ACTION_COMMUNICATION_DELAY)
 
@@ -1790,17 +1643,13 @@ class ESP500Device(NETIODevice):
         ws_topic = "protocols/cloud/cmd"
         ws_data = {"action": "setOnPremis", "token": "", "server": url}
 
-        self.logger.debug(
-            f"Setting on-premise cloud server to {url} on device {self.host}"
-        )
+        self.logger.debug(f"Setting on-premise cloud server to {url} on device {self.host}")
         ws_api.send_request(self, ws_type, ws_topic, ws_data)
         sleep(CLOUD_ACTION_COMMUNICATION_DELAY)
 
     @override
     def netio_push_api_push_now(self) -> None:
-        raise NotImplementedError(
-            "netio_push_api_push_now is not implemented on 5.0.0+ devices"
-        )
+        raise NotImplementedError("netio_push_api_push_now is not implemented on 5.0.0+ devices")
 
     def _cleanup(self) -> None:
         try:
@@ -1978,14 +1827,9 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Setting Ethernet configuration on device {self.host}")
         network_mode = _choice_value(NetworkMode, network_mode, "network_mode")
         current = self._require_config(self.get_ethernet_settings(), "Ethernet")
-        if (
-            network_mode == "static"
-            and current["networkMode"] != "static"
-            and None in (ip, netmask, gateway)
-        ):
+        if network_mode == "static" and current["networkMode"] != "static" and None in (ip, netmask, gateway):
             raise InvalidParameterValueError(
-                "ip, netmask and gateway are required when switching Ethernet "
-                "from DHCP to a static address"
+                "ip, netmask and gateway are required when switching Ethernet from DHCP to a static address"
             )
         ws_data: dict[str, Any] = {
             "mac": current["mac"],

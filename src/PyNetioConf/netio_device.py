@@ -292,9 +292,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_output_schedule(
-        self, output_id: int, schedule_id: int, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule(self, output_id: int, schedule_id: int, enabled: bool | None = None) -> None:
         """
         Activate or deactivate a specific schedule on a given output provided the schedule's ID.
 
@@ -363,9 +361,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_output_schedule_by_name(
-        self, output_id: int, schedule_name: str, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule_by_name(self, output_id: int, schedule_name: str, enabled: bool | None = None) -> None:
         """
         Activate or deactivate a specific schedule on a given output provided the schedule's name. If the schedule
         with such name isn't available raises ElementNotFound.
@@ -639,9 +635,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_periodic_restart(
-        self, enable: bool | None = None, restart_period: int | None = None
-    ) -> None:
+    def set_periodic_restart(self, enable: bool | None = None, restart_period: int | None = None) -> None:
         """
         Sets the periodic restart feature toggle and optionally changes the restart period.
         Parameters
@@ -725,9 +719,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def change_user_password(
-        self, username: str, old_password: str, new_password: str
-    ) -> None:
+    def change_user_password(self, username: str, old_password: str, new_password: str) -> None:
         """
         Changes the password of a user. Requires the can_alter_users privilege. When the user is the logged-in one,
         the password the device object uses to log in again is changed as well.
@@ -750,9 +742,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def create_user(
-        self, username: str, password: str, privileges: list[str] = None
-    ) -> None:
+    def create_user(self, username: str, password: str, privileges: list[str] = None) -> None:
         """
         Creates a new user on the device with the given parameters.
 
@@ -1050,9 +1040,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_mqttflex_state(
-        self, state: bool | None = None, config: dict[str, Any] | None = None
-    ) -> None:
+    def set_mqttflex_state(self, state: bool | None = None, config: dict[str, Any] | None = None) -> None:
         """
         Sets the state and if provided configuration of the MQTT Flex protocol.
 
