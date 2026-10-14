@@ -26,6 +26,12 @@ DEFAULT_PASSWORD = "admin"
 USER_LIST_SYNC_TIMEOUT = 3  # How long create_user and remove_user wait for users/list to show the change
 USER_LIST_SYNC_INTERVAL = 0.5  # Time between two checks of users/list while waiting
 
+# get_firmware_updates_list: the device asks the update server, which takes a few seconds, and locks system/lock
+# meanwhile. It unlocks when the request ends and rebuilds fwupdate/list about 0.4 s later
+FIRMWARE_LIST_TIMEOUT = 60  # How long get_firmware_updates_list waits for the update server's answer
+FIRMWARE_LIST_INTERVAL = 0.2  # Time between two reads of system/lock or fwupdate/list while waiting
+FIRMWARE_LIST_SETTLE = 2  # How long the list has to stay unchanged after the unlock to count as the same answer
+
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive

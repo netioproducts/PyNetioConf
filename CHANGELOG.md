@@ -75,6 +75,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - On 5.x firmware, `netio_push_api_push_now` raises `FeatureNotSupported` instead of `NotImplementedError`. 5.x
   firmware has no supported way to push on demand; it pushes on its period and when the current changes. Code that
   catches `NotImplementedError` around the call has to catch `FeatureNotSupported`.
+- On 5.x firmware, `get_firmware_updates_list()` returns an empty list when there is no newer firmware. It used to
+  return the device's item named "No new firmware available", with an empty version and empty download links. Code that
+  looks for that item has to check for an empty list.
 
 ### Deprecated
 
@@ -172,6 +175,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   took the output at that position in the list without checking the id, so 0 returned the state of the last output and
   an id above the number of outputs raised `IndexError`. Code that caught `IndexError` has to catch
   `InvalidSocketIndex`.
+- On 5.x firmware, `get_firmware_updates_list()` waits until the device has the update server's answer, which takes a
+  few seconds, and raises `CommunicationError` when the device gets none (`FIRMWARE_LIST_TIMEOUT`, 60 seconds). It used
+  to read the list right after asking for the check, so it returned the answer of the previous check, or an item with
+  empty fields when the device hadn't checked since it started.
 
 ## [0.3.0b1] - 2026-10-05
 

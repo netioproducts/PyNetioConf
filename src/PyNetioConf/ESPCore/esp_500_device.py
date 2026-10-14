@@ -39,6 +39,9 @@ from ..constants import (
     DEFAULT_PASSWORD,
     DEFAULT_REQUEST_QUEUE_LEN,
     DEFAULT_USERNAME,
+    FIRMWARE_LIST_INTERVAL,
+    FIRMWARE_LIST_SETTLE,
+    FIRMWARE_LIST_TIMEOUT,
     LOAD_DEFAULTS_GRACE_PERIOD,
     LOAD_DEFAULTS_RETRY_INTERVAL,
     LOAD_DEFAULTS_SETTLE_UPTIME,
@@ -1950,13 +1953,63 @@ class ESP500Device(NETIODevice):
         ws_topic = "system/firmwarelist"
         ws_data = {"getFirmwareList": True, "updateFw": ""}
 
-        self.logger.debug(f"Fetching available firmware updates on device {self.host}")
-        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self.logger.debug(f"Checking for firmware updates on device {self.host}")
+        before = self._get_firmware_list()
+        sleep(FIRMWARE_LIST_INTERVAL)
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        items = self._wait_for_firmware_list(before)
+        # Without newer firmware the device lists one item, "No new firmware available", without version or links
+        if all(not item["version"] and not item["downloadUrl"] and not item["downloadUrlNoMcu"] for item in items):
+            return []
+        return items
 
+    def _get_firmware_list(self) -> list[dict[str, Any]]:
         ws_type = "SUBSCRIBE"
         ws_topic = "fwupdate/list"
-        response = ws_api.send_request(self, ws_type, ws_topic)
-        return response.get("data", {}).get("items", [])
+
+        return ws_api.send_request(self, ws_type, ws_topic)["data"]["items"]
+
+    def _wait_for_firmware_list(self, before: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Waits until fwupdate/list holds the update server's answer to a getFirmwareList request and returns it. before
+        is the list from just before the request.
+
+        The device locks system/lock while it asks the server, unlocks when the request ends and rebuilds the list
+        about 0.4 s later, so a read around the unlock can get the previous list or a partial one. Until the first
+        answer since the device started, the list holds one item with empty fields. A list that differs from before
+        counts once two reads in a row agree. A list that doesn't differ counts as the same answer once it stayed
+        unchanged for FIRMWARE_LIST_SETTLE seconds after the unlock.
+        """
+        fields = ("name", "version", "downloadUrl", "downloadUrlNoMcu", "releaseNoteEn")
+        deadline = perf_counter() + FIRMWARE_LIST_TIMEOUT
+        locked = False
+        unlocked_at: float | None = None
+        previous: list[dict[str, Any]] | None = None
+        while perf_counter() < deadline:
+            sleep(FIRMWARE_LIST_INTERVAL)
+            if self.get_system_lock()["op"] == "lock":
+                locked = True
+            elif locked and unlocked_at is None:
+                unlocked_at = perf_counter()
+            sleep(FIRMWARE_LIST_INTERVAL)
+            items = self._get_firmware_list()
+            complete = len(items) > 0 and all(field in item for item in items for field in fields)
+            complete = complete and all(item["name"] for item in items)
+            if complete and items != before:
+                if items == previous:
+                    return items
+                previous = items
+                continue
+            previous = None
+            if unlocked_at is not None and perf_counter() - unlocked_at >= FIRMWARE_LIST_SETTLE:
+                if complete:
+                    return items
+                raise CommunicationError(
+                    f"Device {self.host} finished asking the firmware update server without getting an answer"
+                )
+        raise CommunicationError(
+            f"Device {self.host} got no answer from the firmware update server within {FIRMWARE_LIST_TIMEOUT} seconds"
+        )
 
     @override
     def get_system_lock(self) -> dict[str, Any]:

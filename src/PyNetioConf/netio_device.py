@@ -1984,11 +1984,25 @@ class NETIODevice(ABC):
         """
         pass
 
-    # TODO: Review method
     @abstractmethod
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:
         """
-        Queries available firmware updates from the cloud service.
+        Has the device check the NETIO update server for newer firmware, like "Check for update" in the web interface,
+        and waits for the answer, which takes a few seconds. NETIO Cloud doesn't have to be enabled for it.
+
+        When a check fails after an earlier one succeeded, the device keeps the earlier answer, and this returns it.
+
+        Returns
+        -------
+            The newer firmware the server offers, each a dict with name, version, downloadUrl (including the low-level
+            system), downloadUrlNoMcu (the device firmware only) and releaseNoteEn. An empty list when there is no
+            newer firmware.
+
+        Raises
+        ------
+        CommunicationError
+            The device got no answer from the update server, or none within FIRMWARE_LIST_TIMEOUT seconds (5.x
+            firmware).
         """
         pass
 
