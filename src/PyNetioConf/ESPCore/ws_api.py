@@ -6,14 +6,18 @@ import math
 import random
 from collections.abc import Generator
 from io import BufferedIOBase
-from time import sleep
-from typing import Any, BinaryIO, NamedTuple, Tuple
+from time import perf_counter, sleep
+from typing import Any, NamedTuple
 
 from websocket import WebSocket, WebSocketConnectionClosedException
 
-from PyNetioConf.constants import WS_EXECUTION_DELAY
+from PyNetioConf.constants import (
+    WS_EXECUTION_DELAY,
+    WS_RECONNECT_INTERVAL,
+    WS_RECONNECT_TIMEOUT,
+)
 
-from ..exceptions import CommunicationError
+from ..exceptions import AuthError, CommunicationError
 from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
@@ -29,9 +33,9 @@ class _FileChunk(NamedTuple):
 
 def send_request(
     device: NETIODevice,
-    type: str,
-    topic: str | None = None,
-    data: dict[str, Any] | None = None,
+    ws_type: str,
+    ws_topic: str | None = None,
+    ws_data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Send a request to the device's websocket API and return the response.
@@ -53,22 +57,28 @@ def send_request(
     if device.ws is None:
         device.login(device.username, device.password)
 
-    request: dict[str, Any] = {"type": type, "reqId": device.ws_req_id}
+    if device.version:
+        if (device.version[0] > 5 or (device.version[0] == 5 and device.version[1] >= 4)) and ws_type == "SUBSCRIBE":
+            ws_type = "GET"
+
+    request: dict[str, Any] = {"type": ws_type, "reqId": device.ws_req_id}
     unsubscribe_needed = False
     expected_reqest_id = device.ws_req_id
-    if type == "SUBSCRIBE":
+    if ws_type == "SUBSCRIBE":
         unsubscribe_needed = True
-    if topic:
-        request["topic"] = topic
-    if data:
-        request["data"] = data
+    if ws_topic:
+        request["topic"] = ws_topic
+    if ws_data:
+        request["data"] = ws_data
     logger.debug(f"Sending request to {device.host} with payload {request}")
+    reconnect_deadline: float | None = None
+    last_reconnect: float | None = None
     while True:
         try:
             if device.ws is None:
-                raise CommunicationError(
-                    "No websocket connection associated with the device"
-                )
+                device.login(device.username, device.password)
+            if device.ws is None:
+                raise ConnectionError("Couldn't establish a WebSocket connection")
             device.ws.send(json.dumps(request, ensure_ascii=False))
             sleep(
                 WS_EXECUTION_DELAY  # TODO: Tie to device/NM
@@ -82,11 +92,9 @@ def send_request(
                     "type": "UNSUBSCRIBE",
                     "reqId": device.ws_req_id,
                 }
-                if topic:
-                    unsubscribe_request["topic"] = topic
-                logger.debug(
-                    f"Sending request to {device.host} with payload {unsubscribe_request}"
-                )
+                if ws_topic:
+                    unsubscribe_request["topic"] = ws_topic
+                logger.debug(f"Sending request to {device.host} with payload {unsubscribe_request}")
                 device.ws.send(json.dumps(unsubscribe_request, ensure_ascii=False))
                 sleep(
                     WS_EXECUTION_DELAY
@@ -107,9 +115,7 @@ def send_request(
                     try:
                         if message_data["reqId"] == expected_reqest_id:
                             waiting_for_reply = False
-                            logger.debug(
-                                f"Processing correct request {message_data['reqId']}"
-                            )
+                            logger.debug(f"Processing correct request {message_data['reqId']}")
                             break
                         elif message_data["reqId"] > expected_reqest_id:
                             if message_data["type"] == "PONG":
@@ -131,9 +137,7 @@ def send_request(
                                     None,
                                 )
                             if match:
-                                logger.debug(
-                                    f"Processing correct request {message_data['reqId']}"
-                                )
+                                logger.debug(f"Processing correct request {message_data['reqId']}")
                                 break
                             else:
                                 raise NotImplementedError
@@ -146,23 +150,91 @@ def send_request(
                         # We shouldn't be able to get here with queuing since we filter EVENTs completely now
                         logger.debug(f"Throwing away websocket message: {message}")
                         continue
+                else:
+                    logger.debug(f"Ignored event: {message}")
 
             if message_data:
                 return message_data
             else:
                 return json.loads(message)
-        except (BrokenPipeError, WebSocketConnectionClosedException):
+        except (
+            BrokenPipeError,
+            WebSocketConnectionClosedException,
+            ConnectionResetError,
+        ):
             # This most likely means that the device has rebooted, or just lost connection for other reasons.
-            # Try to reconnect first, then consider the connection lost.
-            device.login(device.username, device.password, logout=True)
+            # Keep reconnecting for WS_RECONNECT_TIMEOUT seconds, then consider the connection lost.
+            if reconnect_deadline is None:
+                reconnect_deadline = perf_counter() + WS_RECONNECT_TIMEOUT
+            elif perf_counter() >= reconnect_deadline:
+                raise CommunicationError(
+                    f"Connection to {device.host} kept dropping for {WS_RECONNECT_TIMEOUT} seconds."
+                )
+            last_reconnect = _reconnect(device, reconnect_deadline, last_reconnect)
+            if ws_topic == "system/reset":
+                return {}
             continue
+        except AuthError:
+            # A refused login from reconnecting is not a communication problem, retrying can't fix the credentials
+            raise
         except Exception as e:
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
 
 
-def _gen_file_chunks(
-    file_obj: BufferedIOBase, chunk_size: int = 2048
-) -> Generator[_FileChunk, None, None]:
+def _reconnect(device: NETIODevice, deadline: float, last_attempt: float | None) -> float:
+    """
+    Logs back in after the connection to the device dropped. Logins start at most every WS_RECONNECT_INTERVAL
+    seconds, counted from last_attempt, and failed ones are retried until the deadline passes. Both times are
+    perf_counter() values.
+
+    Returns
+    -------
+        The start time of the successful login, to pass as last_attempt if the connection drops again.
+    """
+    while True:
+        if last_attempt is not None:
+            wait = min(
+                last_attempt + WS_RECONNECT_INTERVAL - perf_counter(),
+                deadline - perf_counter(),
+            )
+            if wait > 0:
+                sleep(wait)
+        last_attempt = perf_counter()
+        try:
+            device.login(device.username, device.password, logout=True)
+            return last_attempt
+        except CommunicationError:
+            if perf_counter() >= deadline:
+                raise CommunicationError(f"Couldn't reconnect to {device.host} within {WS_RECONNECT_TIMEOUT} seconds.")
+            logger.debug(f"Reconnecting to {device.host} failed, retrying.")
+
+
+def close_connection(ws: WebSocket | None, graceful: bool = True) -> None:
+    """
+    Closes a WebSocket connection to a device. The device keeps a session for every open connection and has room for
+    only a few, so a connection that isn't needed any more has to be closed, not left to the garbage collector.
+
+    Parameters
+    ----------
+    ws : WebSocket | None
+        The connection to close. None does nothing.
+    graceful : bool
+        Send a close frame and wait for the device's reply. Otherwise the socket is shut down at once, which is meant
+        for a connection that dropped or stopped answering. Default True.
+    """
+    if ws is None:
+        return
+    try:
+        if graceful:
+            ws.close()
+        else:
+            ws.shutdown()
+    except Exception as e:
+        # A connection that can't be closed cleanly has already dropped, the device ends its session either way
+        logger.debug(f"Closing a WebSocket connection failed, dropping it: {e}")
+
+
+def _gen_file_chunks(file_obj: BufferedIOBase, chunk_size: int = 2048) -> Generator[_FileChunk, None, None]:
     """Reads a binary file in chunks.
 
     Yields:
@@ -239,7 +311,6 @@ def chunk_file_upload(
         "topic": chunk_topic,
         "type": ws_type,
     }
-    import copy
 
     _debug_request = {
         **ws_request,
@@ -282,9 +353,21 @@ def generate_auth_token(password_token: tuple[str, str], local_timestamp: int) -
     return f"{password_token[0]}.{token_hash}"
 
 
-def login(
-    device: NETIODevice, timestamp: int, public_key: str, username: str, password: str
-) -> dict[str, Any]:
+def _check_auth_reply(reply: dict[str, Any], host: str) -> None:
+    """
+    Raises AuthError when the device refused the login, with the error code the device sent, such as
+    InvalidCredentials or TooManyFailLogin. A reply without a status counts as a success, only firmware 5.4.0 is
+    checked to send one.
+    """
+    status = reply.get("status")
+    if status is not None and status != "OK":
+        error: dict[str, Any] = reply.get("error", {})
+        code = error.get("code", status)
+        message = str(error.get("message", "")).rstrip(" :")
+        raise AuthError(f"Login to {host} failed with {code}: {message}")
+
+
+def login(device: NETIODevice, timestamp: int, public_key: str, username: str, password: str) -> dict[str, Any]:
     salt = generate_salt()
     password_hash = generate_password_hash(username, password, public_key)
     password_token = generate_password_token(salt, password_hash)
@@ -297,14 +380,17 @@ def login(
     }
     if device.ws is None:
         raise CommunicationError("No websocket connection associated with the device")
-    device.ws.send(json.dumps(request, ensure_ascii=False))
-    logger.debug(f"Sending authentication request to {device.host}, payload: {request}")
-    device.ws_req_id += 1
-    message = device.ws.recv()
-    logger.debug(
-        f"Received authentication response from {device.host}, payload: {message}"
-    )
-    return json.loads(message)
+    try:
+        device.ws.send(json.dumps(request, ensure_ascii=False))
+        logger.debug(f"Sending authentication request to {device.host}, payload: {request}")
+        device.ws_req_id += 1
+        message = device.ws.recv()
+    except Exception as e:
+        raise CommunicationError(f"Failed to log in to {device.host}", str(e))
+    logger.debug(f"Received authentication response from {device.host}, payload: {message}")
+    reply: dict[str, Any] = json.loads(message)
+    _check_auth_reply(reply, device.host)
+    return reply
 
 
 def device_init_login(
@@ -331,7 +417,9 @@ def device_init_login(
     ws_req_id += 1
     message = ws.recv()
     logger.debug(f"Received authentication response from {host}, payload: {message}")
-    return json.loads(message)
+    reply: dict[str, Any] = json.loads(message)
+    _check_auth_reply(reply, host)
+    return reply
 
 
 def device_init_request(
@@ -343,7 +431,8 @@ def device_init_request(
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    This is a simplified version of the send_request() function used for communication between PyNetioConf and a device which is yet to initialize.
+    This is a simplified version of the send_request() function used for communication between PyNetioConf and a device
+    which is yet to initialize.
     """
     request: dict[str, Any] = {"type": type, "reqId": ws_req_id}
     unsubscribe_needed = False
@@ -367,9 +456,7 @@ def device_init_request(
             }
             if topic:
                 unsubscribe_request["topic"] = topic
-            logger.debug(
-                f"Sending request to {host} with payload {unsubscribe_request}"
-            )
+            logger.debug(f"Sending request to {host} with payload {unsubscribe_request}")
             ws.send(json.dumps(unsubscribe_request, ensure_ascii=False))
         ws_req_id += 1
         message = ws.recv()

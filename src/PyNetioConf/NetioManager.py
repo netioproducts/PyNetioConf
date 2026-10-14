@@ -4,11 +4,11 @@ Module for managing NETIO devices across a session without creating multiple con
 
 import atexit
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import requests
 
-from PyNetioConf.exceptions import CommunicationError, FirmwareVersionNotSupported
+from PyNetioConf.exceptions import CommunicationError
 
 from .ESPCore import esp_device_init
 from .netio_device import NETIODevice
@@ -39,7 +39,7 @@ class NetioManager:
         password: str,
         keep_alive: bool = True,
         use_https: bool = False,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> NETIODevice:
         """
         Initialize a Netio device object, create a connection to the device, get its platform type and return
@@ -54,7 +54,7 @@ class NetioManager:
         password: str
             Password for the user.
         keep_alive: bool
-            If True, the connection will be kept alive by sending a keep alive packet every 30 seconds.
+            If True, the connection will be kept alive by sending a keep alive packet every 120 seconds.
         use_https: bool
             Makes the communication with the device based on HTTPs, the protocol must be enabled on the device
             in the security settings.
@@ -68,13 +68,13 @@ class NetioManager:
         try:
             netio_device = esp_device_init.initialize_esp(
                 host, username, password, keep_alive, self, use_https, **kwargs
-            )  # pyright: ignore[reportUnknownMemberType]
+            )
         except requests.exceptions.ConnectionError:
             raise NotImplementedError
         self._connected_devices.append(netio_device)
         return netio_device
 
-    def update_device(self, netio_device: NETIODevice, **kwargs) -> NETIODevice:
+    def update_device(self, netio_device: NETIODevice, **kwargs: Any) -> NETIODevice:
         """
         Update the device object in the device list and return its new instance,
         main use for updating firmware between major versions.
@@ -89,7 +89,7 @@ class NetioManager:
             The updated device object.
         """
         for index, device in enumerate(self._connected_devices):
-            if netio_device.sn_number == device.sn_number:
+            if device is netio_device:
                 updated_device = esp_device_init.initialize_esp(
                     device.host,
                     device.username,
@@ -131,7 +131,7 @@ class NetioManager:
             raise ValueError("Invalid firmware version string")
 
     @staticmethod
-    def get_info(host: str) -> dict:
+    def get_info(host: str) -> dict[str, Any]:
         """
         Get version information from the device.
 
@@ -148,9 +148,7 @@ class NetioManager:
         from urllib3.exceptions import MaxRetryError
 
         try:
-            response = session.post(
-                f"http://{host}/api", json=json_payload, timeout=300
-            )  # noqa
+            response = session.post(f"http://{host}/api", json=json_payload, timeout=300)
         except MaxRetryError:
             from time import sleep
 
@@ -162,7 +160,7 @@ class NetioManager:
         return response.json()
 
     @staticmethod
-    def esp_get_platform(host) -> tuple[str, str]:
+    def esp_get_platform(host: str) -> tuple[str, str]:
         """
         Get platform information from the device, as well as the serial number.
 

@@ -1,7 +1,7 @@
 [project]
 name = "PyNetioConf"
-version = "0.3.0b1"
-requires-python = ">= 3.10"
+version = "0.3.1"
+requires-python = ">= 3.11"
 authors = [
     { name = "NETIO products a.s.", email = "support@netio.eu" }
 ]
@@ -16,11 +16,11 @@ license-files = ["LICENSE"]
 keywords = ["NETIO"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Natural Language :: English",

@@ -3,14 +3,28 @@ Module containing the base class for all NETIO devices. This module is not meant
 extended by the device-specific classes.
 """
 
+import io
+import logging
+import os
+import threading
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional
 from xml.etree.ElementTree import Element
 
 from websocket import WebSocket
 
-# from .NetioManager import NetioManager
+from .constants import (
+    NetworkMode,
+    OutputAction,
+    PushProtocol,
+    SnmpAuthProtocol,
+    SnmpPrivProtocol,
+    SnmpSecurityLevel,
+)
+
+if TYPE_CHECKING:
+    from .NetioManager import NetioManager
 
 
 class NETIODevice(ABC):
@@ -24,6 +38,9 @@ class NETIODevice(ABC):
         5.2.0 has it's own init
     """
 
+    # Every device class sets it in its __init__
+    logger: logging.Logger
+
     def __init__(
         self,
         host: str,
@@ -32,7 +49,7 @@ class NETIODevice(ABC):
         sn_number: str,
         hostname: str,
         keep_alive: bool = True,
-        netio_manager: Optional["NetioManager"] = None,  # type: ignore  # noqa: F821
+        netio_manager: Optional["NetioManager"] = None,
         use_https: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -46,12 +63,13 @@ class NETIODevice(ABC):
         self.output_count = 0
         self.user_permissions: list[str] = list()
         self._keep_alive_flag = keep_alive
-        self._ka_thread = None
+        self._ka_thread: threading.Timer | None = None
         self.ws: WebSocket | None = None
         self.ws_req_id = 0
         self.use_https = use_https
         self._request_queue: deque[dict[str, Any]] = deque()
         self._pong_queue: deque[dict[str, Any]] = deque()
+        self.version = (0, 0, 0)
         if use_https:
             from urllib3 import disable_warnings
             from urllib3.exceptions import InsecureRequestWarning
@@ -60,13 +78,17 @@ class NETIODevice(ABC):
 
         # Keep an instace of NetioManager for updating device classes during
         # firmware updates.
-        self.netio_manager = None
+        self.netio_manager = netio_manager
 
     # region Session
     @abstractmethod
     def login(self, username: str, password: str, logout: bool = False) -> str:
         """
         Login to the device, generating a session ID to be used for the requests across the session.
+
+        After a successful login the device object keeps username and password, which change_password() and the
+        logins after a dropped connection use. When the user is a different one than before, user_permissions is
+        read again for the new user.
 
         Parameters
         ----------
@@ -83,11 +105,8 @@ class NETIODevice(ABC):
     @abstractmethod
     def logout(self) -> None:
         """
-        Log out of the device, clearing the session.
-
-        Returns
-        -------
-            The response of the request.
+        Log out of the device, ending the session. On 5.x firmware this closes the WebSocket connection, so the device
+        frees the session at once, and stops the keep-alive. A request sent after logging out logs in again.
         """
         pass
 
@@ -154,6 +173,11 @@ class NETIODevice(ABC):
         Returns
         -------
             A boolean indicating if the output is on.
+
+        Raises
+        ------
+        InvalidSocketIndex
+            The device has no output with this id.
         """
         pass
 
@@ -187,14 +211,78 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def reset_output(self, output_id: int) -> None:
+    def set_output_action(self, output_id: int, action: OutputAction) -> None:
         """
-        Reset the output given its ID.
+        Controls an output: switches it on or off, toggles it, or switches it for its reset delay (short on, short off).
+        set_output, reset_output, short_on_output and toggle_output do the same for one action each.
 
         Parameters
         ----------
         output_id: int
             The number of the output.
+        action: OutputAction
+            What to do, OutputAction.ON, OFF, SHORT_ON, SHORT_OFF or TOGGLE. The short actions last the output's reset
+            delay (resetDelay in get_output_data(), set with set_output_reset_delay()).
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The action isn't an OutputAction.
+        """
+        pass
+
+    @abstractmethod
+    def reset_output(self, output_id: int) -> None:
+        """
+        Resets the output: switches it off for its reset delay, then on again (short off).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        """
+        pass
+
+    @abstractmethod
+    def short_on_output(self, output_id: int) -> None:
+        """
+        Switches the output on for its reset delay, then off again (short on).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        """
+        pass
+
+    @abstractmethod
+    def toggle_output(self, output_id: int) -> None:
+        """
+        Switches the output to the opposite state.
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
+        """
+        Sets how long reset_output and short_on_output keep the output switched (resetDelay in get_output_data()).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        reset_delay: int
+            The delay in milliseconds, more than 0.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The delay isn't a positive whole number.
         """
         pass
 
@@ -217,9 +305,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_output_schedule(
-        self, output_id: int, schedule_id: int, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule(self, output_id: int, schedule_id: int, enabled: bool | None = None) -> None:
         """
         Activate or deactivate a specific schedule on a given output provided the schedule's ID.
 
@@ -288,9 +374,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_output_schedule_by_name(
-        self, output_id: int, schedule_name: str, enabled: bool | None = None
-    ) -> None:
+    def set_output_schedule_by_name(self, output_id: int, schedule_name: str, enabled: bool | None = None) -> None:
         """
         Activate or deactivate a specific schedule on a given output provided the schedule's name. If the schedule
         with such name isn't available raises ElementNotFound.
@@ -427,13 +511,13 @@ class NETIODevice(ABC):
     # endregion
 
     @abstractmethod
-    def import_config(self, file, **kwargs: Any) -> None:
+    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs: Any) -> None:
         """
         Import configuration to the device from a JSON file.
         Parameters
         ----------
-        file
-            Python file object of the JSON configuration.
+        file : str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase
+            The path of the JSON configuration, or the configuration as a file opened in binary or text mode.
         Returns
         -------
             The response generated by the api request.
@@ -457,18 +541,19 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def update_firmware(self, file) -> "NETIODevice":
+    def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> "NETIODevice":
         """
         Upload a firmware file to the device and begin the upgrade. Note this locks the device out for a time.
 
         Parameters
         ----------
-        file
-            Python file object of the firmware package.
+        file : str | os.PathLike[str] | io.BufferedIOBase
+            The path of the firmware package, or the package as a file opened in binary mode.
 
         Returns
         -------
-            The response generated by the post request.
+            The device object for the updated firmware. NetioManager creates it anew, and it can be of another class
+            than this one, so use it in place of this object.
         """
         pass
 
@@ -564,9 +649,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_periodic_restart(
-        self, enable: bool | None = None, restart_period: int | None = None
-    ) -> None:
+    def set_periodic_restart(self, enable: bool | None = None, restart_period: int | None = None) -> None:
         """
         Sets the periodic restart feature toggle and optionally changes the restart period.
         Parameters
@@ -606,10 +689,12 @@ class NETIODevice(ABC):
     @abstractmethod
     def get_users(self) -> dict[str, Any]:
         """
-        Gets the users and their details.
+        Gets the users on the device.
+
         Returns
         -------
-            A dictionary containing the user information and thir priviledges.
+            A dictionary keyed by username. On 5.x firmware the values only hold the name, use
+            get_user_privileges() for a user's privileges.
         """
         pass
 
@@ -626,13 +711,19 @@ class NETIODevice(ABC):
         Returns
         -------
             A list of string priviledges associated with the specified user.
+
+        Raises
+        ------
+        ElementNotFound
+            The user doesn't exist on the device.
         """
         pass
 
     @abstractmethod
     def change_password(self, new_password: str) -> None:
         """
-        Change the password of the currently logged-in user. Requires you to be logged in as administrator.
+        Changes the password of the logged-in user, and the password the device object uses to log in again
+        after a dropped connection. On 5.x firmware the user needs the can_alter_users privilege.
 
         Parameters
         ----------
@@ -642,27 +733,30 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def change_user_password(
-        self, username: str, old_password: str, new_password: str
-    ) -> None:
+    def change_user_password(self, username: str, old_password: str, new_password: str) -> None:
         """
-        Change the administrator password. Requires you to be logged in as administrator.
+        Changes the password of a user. Requires the can_alter_users privilege. When the user is the logged-in one,
+        the password the device object uses to log in again is changed as well.
 
         Parameters
         ----------
         username: str
             The username of the account you want to change the password for.
         old_password: str
-            The current password of the account.
+            The current password of the account. Firmware 2.x-4.x needs it, 5.x firmware doesn't ask for it and it
+            is not used there.
         new_password: str
             The desired password for the account.
+
+        Raises
+        ------
+        ElementNotFound
+            The user doesn't exist on the device (5.x firmware).
         """
         pass
 
     @abstractmethod
-    def create_user(
-        self, username: str, password: str, privileges: list[str] = None
-    ) -> None:
+    def create_user(self, username: str, password: str, privileges: list[str] | None = None) -> None:
         """
         Creates a new user on the device with the given parameters.
 
@@ -673,10 +767,19 @@ class NETIODevice(ABC):
         password : str
             The password for the account.
         privileges : List[str]
-            List of privileges required to create the account.
-            An empty list means no privileges, the user can only observe. (or more precisely a log-in priviledge gets added automatically)
-            Possible privileges include: ["can_login","can_alter_users","can_alter_settings","can_use_tunnels",
-            "can_browse_logs","can_alter_outputs","can_control_outputs","can_view_settings","can_alter_rules"]
+            The privileges of the new user. None or an empty list gives the user only can_login.
+            On 5.x firmware the possible privileges are the ones in constants.USER_PRIVILEGES: "can_alter_rules",
+            "can_alter_settings", "can_alter_users", "can_login", "can_control_outputs", "can_alter_outputs",
+            "can_view_settings", "can_alter_devices", "can_view_history", "can_control_user_buttons",
+            "can_browse_logs" and "can_use_tunnels". On firmware 2.x-4.x the library accepts the same ones without
+            can_alter_devices, can_view_history and can_control_user_buttons.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            A privilege is not one of the possible ones (5.x firmware, 2.x-4.x raise ValueError).
+        ElementAlreadyExists
+            A user with this username already exists (5.x firmware).
         """
         pass
 
@@ -689,9 +792,57 @@ class NETIODevice(ABC):
         ----------
         username : str
             The username of the account you want to remove.
-        Returns
-        -------
 
+        Raises
+        ------
+        ElementNotFound
+            The user doesn't exist on the device (5.x firmware).
+        """
+        pass
+
+    @abstractmethod
+    def set_user_privileges(self, username: str, privileges: list[str]) -> None:
+        """
+        Replaces the privileges of an existing user. Requires the can_alter_users privilege.
+
+        Parameters
+        ----------
+        username : str
+            The username of the account whose privileges you want to change.
+        privileges : List[str]
+            The complete new list of privileges, see create_user() for the possible ones. Privileges that are not
+            in the list are taken away, so an empty list leaves the user without any, including can_login.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            A privilege is not one of the possible ones.
+        ElementNotFound
+            The user doesn't exist on the device.
+        """
+        pass
+
+    @abstractmethod
+    def set_user_privilege(self, username: str, privilege: str, state: bool) -> None:
+        """
+        Grants or takes away one privilege of an existing user and leaves the others as they are. Requires the
+        can_alter_users privilege.
+
+        Parameters
+        ----------
+        username : str
+            The username of the account whose privilege you want to change.
+        privilege : str
+            The privilege to change, see create_user() for the possible ones.
+        state : bool
+            True grants the privilege, False takes it away.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The privilege is not one of the possible ones.
+        ElementNotFound
+            The user doesn't exist on the device.
         """
         pass
 
@@ -787,6 +938,17 @@ class NETIODevice(ABC):
     # endregion
 
     # region URLAPI
+    @abstractmethod
+    def get_urlapi_state(self) -> dict[str, Any]:
+        """
+        Get the URL API state of the device.
+
+        Returns
+        -------
+            JSON object containing the URL API information.
+        """
+        pass
+
     @abstractmethod
     def set_urlapi_state(
         self,
@@ -903,9 +1065,7 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def set_mqttflex_state(
-        self, state: bool | None = None, config: dict[str, Any] | None = None
-    ) -> None:
+    def set_mqttflex_state(self, state: bool | None = None, config: dict[str, Any] | None = None) -> None:
         """
         Sets the state and if provided configuration of the MQTT Flex protocol.
 
@@ -1005,7 +1165,7 @@ class NETIODevice(ABC):
         self,
         protocol_enabled: bool | None = None,
         url: str | None = None,
-        push_protocol: str | None = None,
+        push_protocol: PushProtocol | str | None = None,
         delta: int | None = None,
         period: int | None = None,
     ) -> None:
@@ -1018,9 +1178,9 @@ class NETIODevice(ABC):
             Whether the protocol should be enabled or disabled. If None, keeps the setting already set on the device.
         url : str
             On what URL should the protocol push its messages. If None, keeps the setting already set on the device.
-        push_protocol : str
-            Which format should the push protocol use. Can be either 'json' or 'xml'. If None, the format is not sent
-            and the device keeps its current one.
+        push_protocol : PushProtocol | str
+            Which format should the push protocol use, PushProtocol.JSON or XML, or the name in lower or upper case.
+            If None, the format is not sent and the device keeps its current one.
         delta : int
             The current delta for auto push. If None, keeps the setting already set on the device.
         period : int
@@ -1077,11 +1237,14 @@ class NETIODevice(ABC):
             Whether the protocol should be enabled or disabled. If disabling the protocol the device will restart.
             If None, keeps the setting already set on the device.
         location : str
-            The location of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
+            The location of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the
+            device.
         community_read : str
-            The community read of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
+            The community read of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set
+            on the device.
         community_write : str
-            The community write of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set on the device.
+            The community write of the SNMP v1,2c protocol to set on the device. If None, keeps the setting already set
+            on the device.
 
         Returns
         -------
@@ -1094,10 +1257,10 @@ class NETIODevice(ABC):
         protocol_enabled: bool | None = None,
         location: str | None = None,
         security_name: str | None = None,
-        security_level: str | None = None,
-        auth_protocol: str | None = None,
+        security_level: SnmpSecurityLevel | str | None = None,
+        auth_protocol: SnmpAuthProtocol | str | None = None,
         auth_key: str | None = None,
-        priv_protocol: str | None = None,
+        priv_protocol: SnmpPrivProtocol | str | None = None,
         priv_key: str | None = None,
     ) -> None:
         """
@@ -1112,17 +1275,17 @@ class NETIODevice(ABC):
             The location of the SNMP v3 protocol, if None, keeps the setting already set on the device.
         security_name : str
             The security name of the SNMP v3 protocol, if None, keeps the setting already set on the device.
-        security_level : str
-            The security level of the SNMP v3, any of ["authPriv", "authNoPriv", "noAuthNoPriv"], if None,
-            keeps the setting already set on the device.
-        auth_protocol : str
-            The authentication protocol of the SNMP v3, if None, keeps the setting already set on the device. If the
-            security level is "noAuthNoPriv" this setting will not be set.
+        security_level : SnmpSecurityLevel | str
+            The security level of the SNMP v3, SnmpSecurityLevel.AUTH_PRIV, AUTH_NO_PRIV or NO_AUTH_NO_PRIV
+            ("authPriv", "authNoPriv" or "noAuthNoPriv"), if None, keeps the setting already set on the device.
+        auth_protocol : SnmpAuthProtocol | str
+            The authentication protocol of the SNMP v3, SnmpAuthProtocol.MD5 or SHA, if None, keeps the setting
+            already set on the device. If the security level is "noAuthNoPriv" this setting will not be set.
         auth_key : str
             The authentication key of the SNMP v3, if None, keeps the setting already set on the device. If the security
             level is "noAuthNoPriv" this setting will not be set.
-        priv_protocol : str
-            The private protocol of the SNMP v3, currently supports "AES" only, if None, keeps the setting already
+        priv_protocol : SnmpPrivProtocol | str
+            The private protocol of the SNMP v3, SnmpPrivProtocol.AES or DES, if None, keeps the setting already
             set on the device. If the security level is "noAuthNoPriv" or "authNoPriv" this setting will not be set.
         priv_key : str
             The private key of the SNMP v3, if None, keeps the setting already set on the device. If the security
@@ -1136,9 +1299,12 @@ class NETIODevice(ABC):
     def netio_push_api_push_now(self) -> None:
         """
         Manually use the push protocol if enabled.
-        Returns
-        -------
 
+        Raises
+        ------
+        FeatureNotSupported
+            On firmware 5.1.0 and newer, which can't push on demand. It pushes on its period and when the current
+            changes.
         """
         pass
 
@@ -1176,7 +1342,8 @@ class NETIODevice(ABC):
             Whether the read only portion of the protocol should be enabled or disabled. If None, keeps the settins
             already on device.
         read_auth : Tuple[str, str]
-            Authentication pair tuple for read only in the format ("username", "password") If None, keeps the settins already on device.
+            Authentication pair tuple for read only in the format ("username", "password") If None, keeps the settins
+            already on device.
         write_enabled: bool
             Whether the write only portion of the protocol should be enabled or disabled. If None, keeps the settins
             already on device.
@@ -1191,6 +1358,17 @@ class NETIODevice(ABC):
         pass
 
     # region XML
+    @abstractmethod
+    def get_xml_api_state(self) -> dict[str, Any]:
+        """
+        Get the XML M2M API state of the device.
+
+        Returns
+        -------
+            JSON object containing the XML API information.
+        """
+        pass
+
     @abstractmethod
     def set_xml_api_state(
         self,
@@ -1295,6 +1473,43 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
+    def create_rule(self, enable: bool, name: str, config: dict[str, Any]) -> None:
+        """
+        Creates a rule on the device. Raises ElementAlreadyExists if a rule of the given name is already present.
+
+        Parameters
+        ----------
+        enable : bool
+            Whether the rule is enabled once it's created.
+        name : str
+            Name of the rule to create.
+        config : dict[str, Any]
+            The rule's configuration with its "conditions", "filters" and "actions", in the format of the "config" that
+            get_rule_by_name() returns.
+
+        Returns
+        -------
+
+        """
+        pass
+
+    @abstractmethod
+    def delete_rule_by_name(self, name: str) -> None:
+        """
+        Deletes a rule from the device given its name. Raises ElementNotFound if the rule isn't found.
+
+        Parameters
+        ----------
+        name : str
+            The name of the rule to delete.
+
+        Returns
+        -------
+
+        """
+        pass
+
+    @abstractmethod
     def get_watchdogs(self) -> list[dict[str, Any]]:
         """
         Gets the list of all watchdogs, enabled or disabled on the device.
@@ -1354,7 +1569,29 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
-    def create_schedule(self, name: str, intervals: list[dict]) -> None:
+    def create_watchdog(self, enable: bool, name: str, config: dict[str, Any]) -> None:
+        """
+        Creates a watchdog on the device. Raises ElementAlreadyExists if a watchdog of the given name is already
+        present.
+
+        Parameters
+        ----------
+        enable : bool
+            Whether the watchdog is enabled once it's created.
+        name : str
+            Name of the watchdog to create.
+        config : dict[str, Any]
+            The watchdog's configuration, such as "target", "pingInterval", "timeout" and "maxRestarts", in the format
+            of the "config" that get_watchdog_by_name() returns.
+
+        Returns
+        -------
+
+        """
+        pass
+
+    @abstractmethod
+    def create_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
         """
         Creates a scedulule on the device given its configuration JSON.
 
@@ -1508,7 +1745,8 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            A list of JSON objects, where each dictionary contains details of a single enabled PAB entry from the device.
+            A list of JSON objects, where each dictionary contains details of a single enabled PAB entry from the
+            device.
         """
         pass
 
@@ -1519,7 +1757,29 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            A list of JSON objects, where each dictionary contains details of a single disabled PAB entry from the device.
+            A list of JSON objects, where each dictionary contains details of a single disabled PAB entry from the
+            device.
+        """
+        pass
+
+    @abstractmethod
+    def create_pab(self, enable: bool, name: str, config: dict[str, Any]) -> None:
+        """
+        Creates a PAB on the device. Raises ElementAlreadyExists if a PAB of the given name is already present.
+
+        Parameters
+        ----------
+        enable : bool
+            Whether the PAB is enabled once it's created.
+        name : str
+            Name of the PAB to create.
+        config : dict[str, Any]
+            The PAB's configuration, such as "type", "source", "lowerBound" and "upperBound", in the format of the
+            "config" that get_pab_by_name() returns.
+
+        Returns
+        -------
+
         """
         pass
 
@@ -1609,6 +1869,30 @@ class NETIODevice(ABC):
         """
         pass
 
+    @abstractmethod
+    def load_defaults(self) -> None:
+        """
+        Resets the device to its factory default configuration, which restarts it. Afterwards the device has only the
+        user admin, with the password admin. Waits until the device is back and logs in as admin with that password;
+        the device object uses these credentials from then on. The device restarts twice: once to load the defaults,
+        and once more when it marks itself installed after getting a network address. This method returns after both.
+
+        The network settings are reset too. A device that had a static IP address can come back at another address,
+        and logging back in then fails. The device comes back with its HTTP server on port 80 and HTTPS switched off,
+        so a device object connected over HTTPS switches to HTTP. One with a port written into host can't follow.
+
+        Raises
+        ------
+        PermissionError
+            The device refused the request for the logged-in user.
+        CommunicationError
+            The device refused the request for another reason, or didn't come back within LOAD_DEFAULTS_TIMEOUT
+            seconds.
+        AuthError
+            The device came back but refused admin with the default password.
+        """
+        pass
+
     # TODO: Review method
     @abstractmethod
     def get_ethernet_settings(self) -> dict[str, Any]:
@@ -1621,7 +1905,7 @@ class NETIODevice(ABC):
     @abstractmethod
     def set_ethernet_settings(
         self,
-        network_mode: str | None = None,
+        network_mode: NetworkMode | str | None = None,
         ip: str | None = None,
         netmask: str | None = None,
         gateway: str | None = None,
@@ -1634,8 +1918,8 @@ class NETIODevice(ABC):
 
         Parameters
         ----------
-        network_mode: str | None
-            Either "dhcp" or "static".
+        network_mode: NetworkMode | str | None
+            NetworkMode.DHCP or STATIC, or "dhcp" or "static".
         ip: str | None
             The IPv4 address the device should use.
         netmask: str | None
@@ -1681,7 +1965,37 @@ class NETIODevice(ABC):
         https_port: int | None = None,
     ) -> None:
         """
-        Sets web server HTTP / HTTPS ports and enablement configuration.
+        Sets which web server the device runs, HTTP or HTTPS, and their ports. The device runs one of them, not both:
+        enabling one disables the other. Arguments left at None keep the device's current values.
+
+        Any change restarts the device. This method waits until the device is back and logs in again, over HTTPS after
+        a switch to HTTPS and over HTTP after a switch back, which takes 15 to 25 seconds. Settings the device already
+        has aren't sent, so they don't restart it.
+
+        Parameters
+        ----------
+        http_enable : bool | None
+            Run the HTTP server. False runs the HTTPS server instead.
+        http_port : int | None
+            Port of the HTTP server.
+        https_enable : bool | None
+            Run the HTTPS server. False runs the HTTP server instead.
+        https_port : int | None
+            Port of the HTTPS server.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            http_enable and https_enable are both True or both False.
+        NotImplementedError
+            The server the device would run listens on another port than the one the device object connects on: 80
+            for HTTP, 443 for HTTPS, or the port written into host. The device object can't follow it there yet.
+            Nothing is sent.
+        PermissionError
+            The device refused the change for the logged-in user.
+        CommunicationError
+            The device refused the change for another reason, or wasn't back within WEB_SERVER_RESTART_TIMEOUT
+            seconds.
         """
         pass
 
@@ -1701,11 +2015,113 @@ class NETIODevice(ABC):
         """
         pass
 
-    # TODO: Review method
     @abstractmethod
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:
         """
-        Queries available firmware updates from the cloud service.
+        Has the device check the NETIO update server for newer firmware, like "Check for update" in the web interface,
+        and waits for the answer, which takes a few seconds. NETIO Cloud doesn't have to be enabled for it.
+
+        An answer younger than FIRMWARE_LIST_CACHE_TIME seconds (2 minutes) is reused instead of checking again, also
+        by is_update_available() and update_firmware_online(). When a check fails after an earlier one succeeded, the
+        device keeps the earlier answer, and this returns it.
+
+        Returns
+        -------
+            The newer firmware the server offers, each a dict with name, version, downloadUrl (including the low-level
+            system), downloadUrlNoMcu (the device firmware only) and releaseNoteEn. An empty list when there is no
+            newer firmware.
+
+        Raises
+        ------
+        CommunicationError
+            The device got no answer from the update server, or none within FIRMWARE_LIST_TIMEOUT seconds (5.x
+            firmware).
+        FeatureNotSupported
+            The firmware is older than 5.1.0. There the NETIO Cloud starts online updates, and the device can't check
+            for them itself.
+        """
+        pass
+
+    @abstractmethod
+    def is_update_available(self) -> bool:
+        """
+        Has the device check the NETIO update server for newer firmware through get_firmware_updates_list(), which takes
+        a few seconds. The answer is reused for FIRMWARE_LIST_CACHE_TIME seconds, so update_firmware_online() right
+        after this doesn't check again.
+
+        Returns
+        -------
+            True when the server offers newer firmware, which update_firmware_online() installs.
+
+        Raises
+        ------
+        CommunicationError
+            The device got no answer from the update server, or none within FIRMWARE_LIST_TIMEOUT seconds.
+        FeatureNotSupported
+            The firmware is older than 5.1.0.
+        """
+        pass
+
+    @abstractmethod
+    def update_firmware_online(
+        self, include_low_level_system: bool = False, version: str | None = None
+    ) -> "NETIODevice":
+        """
+        Updates the device to firmware the NETIO update server offers, like "Update device firmware" in the web
+        interface, and waits until the device runs it. The device downloads the firmware itself and restarts. This
+        takes a few minutes, and the device can't be reached in between. A failed download restarts the device as well.
+        The device may try again after that restart, ONLINE_UPDATE_ATTEMPTS attempts in all; when it doesn't start
+        another attempt within ONLINE_UPDATE_RETRY_WAIT seconds, the update counts as failed.
+
+        Parameters
+        ----------
+        include_low_level_system : bool
+            Also update the low-level system (the MCU firmware), like "Update incl. low-level system" in the web
+            interface.
+        version : str | None
+            The version to install, such as "5.3.2", one of the versions get_firmware_updates_list() returns. Only
+            firmware the server offers is installed. None installs the newest one on offer.
+
+        Returns
+        -------
+            The device object for the updated firmware. NetioManager creates it anew, and it can be of another class
+            than this one, so use it in place of this object. When no version is requested and the server offers no
+            newer firmware, nothing is updated and this object is returned.
+
+        Raises
+        ------
+        ElementNotFound
+            The server doesn't offer the requested version. Nothing is sent to start an update.
+        CommunicationError
+            The device didn't start the update, came back from a failed attempt and didn't start another, didn't run
+            the new firmware after its last attempt, or not within ONLINE_UPDATE_TIMEOUT seconds.
+        FeatureNotSupported
+            The firmware is older than 5.1.0. There the NETIO Cloud starts online updates, not the device.
+        """
+        pass
+
+    @abstractmethod
+    def update_firmware_incl_low_level_online(self, version: str | None = None) -> "NETIODevice":
+        """
+        Updates the device and its low-level system (the MCU firmware) to firmware the NETIO update server offers, like
+        "Update incl. low-level system" in the web interface. A shortcut for
+        update_firmware_online(include_low_level_system=True), see there.
+
+        Parameters
+        ----------
+        version : str | None
+            The version to install, such as "5.3.2", which the server has to offer. None installs the newest one on
+            offer.
+
+        Returns
+        -------
+            The device object for the updated firmware, or this object when no version is requested and the server
+            offers no newer firmware.
+
+        Raises
+        ------
+        ElementNotFound
+            The server doesn't offer the requested version. Nothing is sent to start an update.
         """
         pass
 
@@ -1724,4 +2140,3 @@ class NETIODevice(ABC):
         Gets active system notification/error messages.
         """
         pass
-

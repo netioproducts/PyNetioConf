@@ -6,10 +6,8 @@ import atexit
 import io
 import json
 import os
-import ssl
 import sys
 from collections import deque
-from io import BytesIO
 from pathlib import Path
 from time import sleep, time
 
@@ -19,22 +17,21 @@ from ..constants import (
 )
 
 if sys.version_info >= (3, 12):
-    from typing import IO, Any, AnyStr, Dict, List, Tuple, override
+    from typing import Any, override
 else:
-    from typing import IO, Any, AnyStr, Dict, List, Tuple
+    from typing import Any
 
     from typing_extensions import override
 
 import logging
 import threading
 
-import websocket
 from websocket import WebSocket
 
 from .. import NetioManager
 from ..exceptions import CommunicationError, ElementNotFound
 from ..netio_device import NETIODevice
-from . import esp_api, ws_api
+from . import ws_api
 from .esp_500_device import ESP500Device
 
 
@@ -56,29 +53,58 @@ class ESP520Device(ESP500Device):
         **kwargs: Any,
     ):
         """
-        The 5.x.x versions of Netio firmware have been severely redesigned which includes the entirety of the API that is used for communication with the device therefore this init is completely separated from the base classes and does not call super().__init__ but instead makes a new class from scratch. If the base NETIODevice class gets updated this has to be done accordingly here.
+        Creates the device object for a NETIO device running firmware 5.2.x and 5.3.x. This is normally not called
+        directly: NetioManager.init_device detects the firmware version, opens and authenticates the WebSocket
+        connection, and passes that connection state in through kwargs.
+
+        The 5.x.x versions of Netio firmware have been severely redesigned, which includes the entirety of the API
+        used to communicate with the device. Therefore this init is completely separate from the base classes and
+        does not call super().__init__. If the base NETIODevice class gets updated, this has to be updated
+        accordingly.
 
         Parameters
         ----------
         host : str
-
+            IP address or hostname of the device, without any URL parts such as 'http://'.
         username : str
-
+            Username to log in with. Note that many actions require administrator privileges.
         password : str
-
+            Password for the user.
         sn_number : str
-
+            Serial number of the device. NetioManager passes an empty string; the 5.x classes don't use it.
         hostname : str
-
-         : Any
-
+            Network hostname of the device. NetioManager passes an empty string; the 5.x classes don't use it.
         keep_alive : bool
-
+            If True, a background thread pings the device every 120 seconds to keep the WebSocket session open.
         netio_manager : NetioManager | None
-
+            The NetioManager instance the device belongs to. Used after a firmware update to replace the object
+            with the class that matches the new firmware version.
         use_https : bool
+            Communicate over HTTPS and secure WebSockets (wss://) instead of HTTP and ws://. HTTPS must be enabled
+            on the device. Also silences urllib3's InsecureRequestWarning, since devices use self-signed
+            certificates.
+        **kwargs : Any
+            Connection state handed over by NetioManager. None of these are required when creating the object by
+            hand, but without them the init opens and authenticates a new connection itself.
 
-
+            ws_connection : websocket.WebSocket | None
+                An open WebSocket connection to the device. If None, a new connection is opened on login.
+                Default None.
+            is_ws_auth : bool
+                Whether ws_connection is already authenticated. If True the login step is skipped, otherwise the
+                init logs in with username and password. Default False.
+            ws_req_id : int
+                The next request ID to use, so that IDs continue from the requests already sent on
+                ws_connection. Default 0.
+            ws_helo_data : dict[str, Any]
+                The device's full reply to the initial HELO request, which carries the public key used for password
+                hashing. If not given, a new HELO request is sent. Default None.
+            device_version : tuple[int, int, int]
+                Firmware version of the device as (major, minor, patch). Also selects the API dialect: on 5.2.x and
+                newer, requests use GET instead of SUBSCRIBE. Default (5, 2, 0).
+            ssl_options : dict[str, Any]
+                SSL options passed to websocket-client as sslopt whenever the connection is (re)opened over wss://.
+                NetioManager builds this from the ssl_* keyword arguments of init_device. Default {}.
         """
         self.host = host
         self.username = username
@@ -92,6 +118,7 @@ class ESP520Device(ESP500Device):
         self._keep_alive_flag = keep_alive
         self.ws_req_id = kwargs.get("ws_req_id", 0)
         self.use_https = use_https
+        self.version = kwargs.get("device_version", (5, 2, 0))
         if use_https:
             from urllib3 import disable_warnings
             from urllib3.exceptions import InsecureRequestWarning
@@ -100,17 +127,27 @@ class ESP520Device(ESP500Device):
 
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        # Last answer of get_firmware_updates_list() and its perf_counter() time, reused for FIRMWARE_LIST_CACHE_TIME
+        self._firmware_list: list[dict[str, Any]] | None = None
+        self._firmware_list_time = 0.0
 
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
+        self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):
             self.session_id = "TODO AUTH"
         else:
             self.session_id = self.login(username, password)
         # self.supported_features = self.get_features()
         # self.output_count: int = self.supported_features["outputCount"]
-        # self.user_permissions = self.get_current_user()["privileges"]
+        try:
+            self.user_permissions = self.get_user_privileges(username)
+        except (CommunicationError, ElementNotFound):
+            self.logger.warning(
+                f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
+            )
+        self._ka_thread: threading.Timer | None = None
         if keep_alive:
             self._ka_thread = threading.Timer(120, self._keep_alive)
             self._ka_thread.daemon = True
@@ -118,8 +155,8 @@ class ESP520Device(ESP500Device):
         atexit.register(self._cleanup)
 
         # New Init
-        self.ssl_options: dict[str, Any] | None = kwargs.get("ssl_options", dict())
-        self.logger = logging.getLogger(self.__class__.__name__)
+        # Logger of the module the class is defined in, so it stays under the package hierarchy for subclasses too
+        self.logger = logging.getLogger(type(self).__module__)
         self.netio_manager = netio_manager
         # self.fw_version = self.get_version()
 
@@ -128,60 +165,71 @@ class ESP520Device(ESP500Device):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
+        self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
 
-    # TODO: Handle repeated code for uploading files using chunking
+    # Since 5.2.0 the upload topics reply with an uploadId, and the file goes over the WebSocket through upload/chunk
     @override
     def upload_mqtt_client_key(self, key: str) -> None:
-        import base64
-
         ws_type = "SET"
         ws_topic = "protocols/mqtt/clientkeyupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
-        original_bytes = key.encode("utf-8")
-        base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(self, base64_string, 0, len(key), len(key), upload_id)
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+        ws_api.upload_file(self, io.BytesIO(key.encode("utf-8")), upload_id)
 
     @override
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
-        import base64
-
         ws_type = "SET"
         ws_topic = "protocols/mqtt/cacertupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
-        original_bytes = ca.encode("utf-8")
-        base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(self, base64_string, 0, len(ca), len(ca), upload_id)
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+        ws_api.upload_file(self, io.BytesIO(ca.encode("utf-8")), upload_id)
 
     @override
     def upload_mqtt_client_certificate(self, cert: str) -> None:
-        import base64
-
         ws_type = "SET"
         ws_topic = "protocols/mqtt/clientcertupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
-        original_bytes = cert.encode("utf-8")
-        base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(
-            self, base64_string, 0, len(cert), len(cert), upload_id
-        )
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+        ws_api.upload_file(self, io.BytesIO(cert.encode("utf-8")), upload_id)
 
     @override
-    def update_firmware(self, file: os.PathLike[AnyStr] | BytesIO) -> NETIODevice:
+    def upload_https_private_key(self, keyfile: str) -> None:
+        ws_type = "SET"
+        ws_topic = "system/srvkeyupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading HTTPS private key to device {self.host}.")
+        with open(keyfile, "rb") as file:
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+            ws_api.upload_file(self, file, upload_id)
+
+    @override
+    def upload_https_certificate(self, certfile: str) -> None:
+        ws_type = "SET"
+        ws_topic = "system/srvcertupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading HTTPS certificate to device {self.host}.")
+        with open(certfile, "rb") as file:
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+            ws_api.upload_file(self, file, upload_id)
+
+    @override
+    def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as firmware_file:
+                return self.update_firmware(firmware_file)
+        if not isinstance(file, io.BufferedIOBase):
+            raise TypeError(
+                f"Unsupported file type {type(file).__name__}, expected a path or a file opened in binary mode."
+            )
+
         # TODO: Implement permission checks
         # if "can_alter_settings" not in self.user_permissions:
         #     raise PermissionError(
@@ -196,14 +244,9 @@ class ESP520Device(ESP500Device):
         try:
             if self.supported_features["wifi"] == "yes":
                 wifi_settings = self.get_wifi_settings()
-                if (
-                    wifi_settings["mode"] == "client"
-                    and wifi_settings["client"]["status"] == "Connected"
-                ):
+                if wifi_settings["mode"] == "client" and wifi_settings["client"]["status"] == "Connected":
                     pre_reconnect_wait = 50
-                    self.logger.debug(
-                        "Increased wait time after fimrware update due to active Wi-Fi connection."
-                    )
+                    self.logger.debug("Increased wait time after fimrware update due to active Wi-Fi connection.")
         except KeyError:
             pre_reconnect_wait = 100
 
@@ -218,28 +261,23 @@ class ESP520Device(ESP500Device):
             ws_type = "SET"
             ws_topic = "system/fwupdate"
             ws_data = {}
-            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-                "uploadId"
-            ]
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
 
-            if isinstance(file, io.BufferedIOBase):
-                ws_api.upload_file(self, file, upload_id)
-            else:
-                self.logger.debug("Unsupported file format.")
+            ws_api.upload_file(self, file, upload_id)
         except CommunicationError:
             self.logger.warning(
-                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if the device connects, waiting for connection."
+                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if "
+                "the device connects, waiting for connection."
             )
-        self.logger.debug(
-            f"Uploaded firmware, device {self.host} might be unresponsive for a while."
-        )
+        self.logger.debug(f"Uploaded firmware, device {self.host} might be unresponsive for a while.")
 
         # TODO: Sophisticated
         pre_reconnect_wait = 30
         sleep(pre_reconnect_wait)
 
         self.logger.debug(
-            f"Retrying connection to device {self.host} after updating firmware to new version, the device class is now going to update."
+            f"Retrying connection to device {self.host} after updating firmware to new version, the device class is "
+            "now going to update."
         )
 
         # TODO: Check connectivity for new FW
@@ -254,12 +292,13 @@ class ESP520Device(ESP500Device):
         #     )
 
         updated_instance = None
-        if type(self.netio_manager) is NetioManager:
+        if isinstance(self.netio_manager, NetioManager):
             updated_instance = self.netio_manager.update_device(self, ws_expected=True)
 
         if isinstance(updated_instance, NETIODevice):
             self.logger.info(
-                f"The device has updated to {updated_instance.get_version_detailed()}, the device object is now of the {type(updated_instance)} class, check documentation for supported features and changes."
+                f"The device has updated to {updated_instance.get_version_detailed()}, the device object is now of "
+                f"the {type(updated_instance)} class, check documentation for supported features and changes."
             )
 
         if not updated_instance:
@@ -268,24 +307,22 @@ class ESP520Device(ESP500Device):
         return updated_instance
 
     @override
-    def import_config(self, file, **kwargs):
+    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs: Any):
         ws_type = "SET"
         ws_topic = "system/cfgimport"
         ws_data = {}
-        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"][
-            "uploadId"
-        ]
 
-        if isinstance(file, io.BufferedIOBase):
-            self.logger.debug(f"Importing configuration to host {self.host}")
-            ws_api.upload_file(self, file, upload_id)
-        elif isinstance(file, str):
-            file_path = Path(file)
-            if file_path.exists():
-                with open(file, "rb") as file:
-                    ws_api.upload_file(self, file, upload_id)
-        else:
-            self.logger.debug("Unsupported file format.")
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as config_file:
+                return self.import_config(config_file, **kwargs)
+        if isinstance(file, io.TextIOBase):
+            file = io.BytesIO(file.read().encode("utf-8"))
+        if not isinstance(file, io.BufferedIOBase):
+            raise TypeError(f"Unsupported file type {type(file).__name__}, expected a path or a file object.")
+
+        self.logger.debug(f"Importing configuration to host {self.host}")
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+        ws_api.upload_file(self, file, upload_id)
 
     @override
     def ping(self) -> bool:
@@ -293,9 +330,7 @@ class ESP520Device(ESP500Device):
         start_time = time()
         ws_api.send_request(self, ws_type)
         end_time = time()
-        self.logger.debug(
-            f"Pinging device {self.host} successful. Response time: {end_time - start_time}"
-        )
+        self.logger.debug(f"Pinging device {self.host} successful. Response time: {end_time - start_time}")
         return True
 
     @override
@@ -320,12 +355,8 @@ class ESP520Device(ESP500Device):
         config_export: dict[str, Any] = dict()
 
         for config_group in ws_export_topics_list:
-            self.logger.debug(
-                f"Exporting configuration for {config_group.split('/')[-1]} from device {self.host}"
-            )
-            group_data = ws_api.send_request(self, ws_type, config_group, ws_data).get(
-                "data", {}
-            )
+            self.logger.debug(f"Exporting configuration for {config_group.split('/')[-1]} from device {self.host}")
+            group_data = ws_api.send_request(self, ws_type, config_group, ws_data).get("data", {})
             config_export |= {config_group.split("/")[-1]: group_data}
         if save_file is not None:
             file_path = Path(save_file)

@@ -55,8 +55,7 @@ uv add PyNetioConf
 pip install PyNetioConf
 ```
 
-While only beta versions are published, this installs the latest beta. Once a stable version is released,
-installers will prefer it, and betas will need to be requested explicitly with
+This installs the latest stable version. Betas and other pre-releases have to be requested explicitly with
 `uv add --prerelease=allow PyNetioConf` or `pip install --pre PyNetioConf`.
 
 ## Usage
@@ -71,7 +70,7 @@ installers will prefer it, and betas will need to be requested explicitly with
 from PyNetioConf import NetioManager
 
 nm = NetioManager()
-# The NetioManager instance handles all the devices and their sessions, preventing any session crowding and 
+# The NetioManager instance handles all the devices and their sessions, preventing any session crowding and
 # collisions in case of multiple device instances
 
 device = nm.init_device("powerpdu-8qs.netio-products.com", "demo", "demo")

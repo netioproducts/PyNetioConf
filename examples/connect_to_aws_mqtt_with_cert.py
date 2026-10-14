@@ -1,5 +1,7 @@
-from PyNetioConf import NetioManager
 import requests
+
+from PyNetioConf import NetioManager
+
 # import json # Only needed if reading MQTT configuration from a file
 
 # Create an instance of the device we want to connect to the AWS IoT cloud.
@@ -21,11 +23,11 @@ DEVICE_CERTIFICATE_PATH = "/path/to/device/cert.pem"
 # ROOT_CA_CERTIFICATE_PATH = "/path/to/root/ca.pem" # Root CA can be downloaded directly from Amazon
 
 # Upload the device key and certificate we get from the connection package
-with open(PRIVATE_KEY_PATH, "rt") as private_key:
+with open(PRIVATE_KEY_PATH) as private_key:
     key = private_key.read()
     netio_device.upload_mqtt_client_key(key)
 
-with open(DEVICE_CERTIFICATE_PATH, "rt") as device_cert:
+with open(DEVICE_CERTIFICATE_PATH) as device_cert:
     certificate = device_cert.read()
     netio_device.upload_mqtt_client_certificate(certificate)
 
@@ -46,40 +48,30 @@ MQTT_BROKER = "mqtt.broker.address.com"
 # Please make sure that your configuration is valid, and that the clientid and topics match your policies
 # if you have any policies active on AWS.
 device_config = {
-  "broker": {
-    "clientid": "netio${DEVICE_SN}",
-    "keepalive": 30,
-    "password": "",
-    "port": 8883,
-    "protocol": "mqtt",
-    "ssl": True,
-    "type": "generic",
-    "url": MQTT_BROKER,
-    "username": "",
-    "clientcert": True
-  },
-  "publish": [
-    {
-      "events": [
+    "broker": {
+        "clientid": "netio${DEVICE_SN}",
+        "keepalive": 30,
+        "password": "",
+        "port": 8883,
+        "protocol": "mqtt",
+        "ssl": True,
+        "type": "generic",
+        "url": MQTT_BROKER,
+        "username": "",
+        "clientcert": True,
+    },
+    "publish": [
         {
-          "source": "OUTPUTS/1/STATE",
-          "type": "change"
+            "events": [{"source": "OUTPUTS/1/STATE", "type": "change"}],
+            "payload": "${INOUT_STATUS}",
+            "qos": 0,
+            "retain": False,
+            "topic": "devices/${DEVICE_NAME}/messages/devicebound/",
         }
-      ],
-      "payload": "${INOUT_STATUS}",
-      "qos": 0,
-      "retain": False,
-      "topic": "devices/${DEVICE_NAME}/messages/devicebound/"
-    }
-  ],
-  "subscribe": [
-    {
-      "action": "${payload}",
-      "qos": 0,
-      "target": "REST_JSON",
-      "topic": "devices/${DEVICE_NAME}/messages/events/"
-    }
-  ]
+    ],
+    "subscribe": [
+        {"action": "${payload}", "qos": 0, "target": "REST_JSON", "topic": "devices/${DEVICE_NAME}/messages/events/"}
+    ],
 }
 
 # Now we upload the config to the device and enable the MQTT protocol
