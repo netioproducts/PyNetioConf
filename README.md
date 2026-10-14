@@ -55,8 +55,7 @@ uv add PyNetioConf
 pip install PyNetioConf
 ```
 
-While only beta versions are published, this installs the latest beta. Once a stable version is released,
-installers will prefer it, and betas will need to be requested explicitly with
+This installs the latest stable version. Betas and other pre-releases have to be requested explicitly with
 `uv add --prerelease=allow PyNetioConf` or `pip install --pre PyNetioConf`.
 
 ## Usage

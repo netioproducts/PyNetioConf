@@ -7,6 +7,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-15
+
 ### Added
 
 - Support for firmware 5.4.x: devices running 5.4.0 and newer are created as the new `ESP540Device` class. On 5.4.x
@@ -219,5 +221,6 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 First public release, published to PyPI as a beta.
 
-[Unreleased]: https://github.com/netioproducts/PyNetioConf/compare/v0.3.0b1...HEAD
+[Unreleased]: https://github.com/netioproducts/PyNetioConf/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/netioproducts/PyNetioConf/compare/v0.3.0b1...v0.3.1
 [0.3.0b1]: https://github.com/netioproducts/PyNetioConf/releases/tag/v0.3.0b1
