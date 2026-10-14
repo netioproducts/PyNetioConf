@@ -58,6 +58,7 @@ from ..exceptions import (
     CommunicationError,
     ElementAlreadyExists,
     ElementNotFound,
+    FeatureNotSupported,
     InvalidParameterValueError,
     InvalidSocketIndex,
 )
@@ -259,9 +260,9 @@ class ESP500Device(NETIODevice):
                             f"wss://{self.host}/emweb",
                             sslopt=self.ssl_options,
                             timeout=10,
-                        )  # pyright: ignore[reportUnknownMemberType]
+                        )
                     else:
-                        self.ws = websocket.create_connection(f"ws://{self.host}/emweb", timeout=10)  # pyright: ignore[reportUnknownMemberType]
+                        self.ws = websocket.create_connection(f"ws://{self.host}/emweb", timeout=10)
                 except Exception:
                     self.logger.debug(f"Connection to {self.host} failed on {attempt + 1}/{try_count}")
                     sleep(1)
@@ -804,9 +805,10 @@ class ESP500Device(NETIODevice):
         }
         try:
             self.get_schedule_by_name(name)
-            raise
         except ElementNotFound:
             pass
+        else:
+            raise ElementAlreadyExists(f"Schedule {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create schedule {name} on device {self.host}.")
         self.logger.debug(f"Schedule configuration: {intervals}")
         ws_api.send_request(self, ws_type, topic, ws_data)
@@ -1375,11 +1377,14 @@ class ESP500Device(NETIODevice):
                 json.dump(config["data"]["config"], file)
         return config["data"]["config"]
 
-    def import_config(self, file, **kwargs: Any) -> None:
+    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs: Any) -> None:
         ws_type = "SET"
         ws_topic = "system/cfgimport"
         ws_data: dict[str, Any] = {}
 
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as config_file:
+                return self.import_config(config_file, **kwargs)
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
@@ -1673,7 +1678,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def netio_push_api_push_now(self) -> None:
-        raise NotImplementedError("netio_push_api_push_now is not implemented on 5.0.0+ devices")
+        raise FeatureNotSupported("Netio Push on demand is not supported on firmware 5.1.0 and newer.")
 
     def _cleanup(self) -> None:
         try:

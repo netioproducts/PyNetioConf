@@ -4,8 +4,6 @@ This module contains functions for sending requests to the device's API on EPS b
 
 import io
 import logging
-
-# from . import ESP200Device, ESP300Device, ESP400Device, ESP500Device
 from typing import Any
 
 import requests
@@ -16,76 +14,6 @@ from ..netio_device import NETIODevice
 logger = logging.getLogger(__name__)
 
 
-# def init_device(
-#     version: int,
-#     host: str,
-#     username: str,
-#     password: str,
-#     keep_alive: bool = True,
-#     netio_manager: Optional["NetioManager"] = None,  # type: ignore # noqa
-#     use_https: bool = False,
-#     **kwargs: Any,
-# ) -> NETIODevice:
-#     if netio_manager is None:
-#         raise InvalidParameterValueError
-#
-#     if version == 2:
-#         netio_device = ESP200Device(
-#             host,
-#             username,
-#             password,
-#             "",
-#             "",
-#             keep_alive,
-#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-#             use_https,
-#         )
-#         return netio_device
-#
-#     if version == 3:
-#         netio_device = ESP300Device(
-#             host,
-#             username,
-#             password,
-#             "",
-#             "",
-#             keep_alive,
-#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-#             use_https,
-#         )
-#         return netio_device
-#
-#     if version == 4:
-#         netio_device = ESP400Device(
-#             host,
-#             username,
-#             password,
-#             "",
-#             "",
-#             keep_alive,
-#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-#             use_https,
-#         )
-#         return netio_device
-#
-#     if version == 5:
-#         netio_device = ESP500Device(
-#             host,
-#             username,
-#             password,
-#             "",
-#             "",
-#             keep_alive,
-#             netio_manager,  # pyright: ignore[reportUnknownArgumentType]
-#             use_https,
-#         )
-#         return netio_device
-#
-#     raise InvalidParameterValueError(
-#         f"There is no firmware with major version {version} supported"
-#     )
-#
-#
 def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
     try:
         protocol = "https" if fw_object.use_https else "http"

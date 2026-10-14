@@ -2,7 +2,7 @@ import logging
 import re
 import ssl
 from time import perf_counter, sleep
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import websocket
 from websocket import WebSocket
@@ -10,6 +10,9 @@ from websocket import WebSocket
 from ..exceptions import AuthError, InvalidParameterValueError
 from ..netio_device import NETIODevice
 from . import ws_api
+
+if TYPE_CHECKING:
+    from ..NetioManager import NetioManager
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +134,9 @@ def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs:
         try:
             connection_dt_start = perf_counter()
             if use_https:
-                ws = websocket.create_connection(f"wss://{host}/emweb", sslopt=ssl_options, timeout=10)  # pyright: ignore[reportUnknownMemberType]
+                ws = websocket.create_connection(f"wss://{host}/emweb", sslopt=ssl_options, timeout=10)
             else:
-                ws = websocket.create_connection(f"ws://{host}/emweb", timeout=10)  # pyright: ignore[reportUnknownMemberType]
+                ws = websocket.create_connection(f"ws://{host}/emweb", timeout=10)
 
             if isinstance(ws, WebSocket):
                 logger.debug(f"Succesfully connected to {host}")
@@ -159,7 +162,7 @@ def initialize_esp(
     username: str,
     password: str,
     keep_alive: bool = True,
-    netio_manager: Optional["NetioManager"] = None,  # type: ignore # noqa
+    netio_manager: Optional["NetioManager"] = None,
     use_https: bool = False,
     **kwargs: Any,
 ) -> NETIODevice:
@@ -232,7 +235,7 @@ def initialize_esp(
             "",
             "",
             keep_alive,
-            netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+            netio_manager,
             use_https,
         )
         return netio_device
@@ -247,7 +250,7 @@ def initialize_esp(
             "",
             "",
             keep_alive,
-            netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+            netio_manager,
             use_https,
         )
         return netio_device
@@ -262,7 +265,7 @@ def initialize_esp(
             "",
             "",
             keep_alive,
-            netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+            netio_manager,
             use_https,
         )
         return netio_device
@@ -279,7 +282,7 @@ def initialize_esp(
                     "",
                     "",
                     keep_alive,
-                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    netio_manager,
                     use_https,
                     ws_connection=ws,
                     ws_req_id=ws_req_id,
@@ -299,7 +302,7 @@ def initialize_esp(
                     "",
                     "",
                     keep_alive,
-                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    netio_manager,
                     use_https,
                     ws_connection=ws,
                     ws_req_id=ws_req_id,
@@ -319,7 +322,7 @@ def initialize_esp(
                     "",
                     "",
                     keep_alive,
-                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    netio_manager,
                     use_https,
                     ws_connection=ws,
                     ws_req_id=ws_req_id,
@@ -342,7 +345,7 @@ def initialize_esp(
                     "",
                     "",
                     keep_alive,
-                    netio_manager,  # pyright: ignore[reportUnknownArgumentType]
+                    netio_manager,
                     use_https,
                 )
                 return netio_device

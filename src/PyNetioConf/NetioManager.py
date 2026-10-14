@@ -68,7 +68,7 @@ class NetioManager:
         try:
             netio_device = esp_device_init.initialize_esp(
                 host, username, password, keep_alive, self, use_https, **kwargs
-            )  # pyright: ignore[reportUnknownMemberType]
+            )
         except requests.exceptions.ConnectionError:
             raise NotImplementedError
         self._connected_devices.append(netio_device)
@@ -148,7 +148,7 @@ class NetioManager:
         from urllib3.exceptions import MaxRetryError
 
         try:
-            response = session.post(f"http://{host}/api", json=json_payload, timeout=300)  # noqa
+            response = session.post(f"http://{host}/api", json=json_payload, timeout=300)
         except MaxRetryError:
             from time import sleep
 

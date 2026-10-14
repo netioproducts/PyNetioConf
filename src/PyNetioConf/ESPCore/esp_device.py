@@ -333,7 +333,10 @@ class ESPDevice(NETIODevice):
 
     # endregion
 
-    def import_config(self, file, **kwargs: Any) -> None:
+    def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs: Any) -> None:
+        if isinstance(file, (str, os.PathLike)):
+            with open(file, "rb") as config_file:
+                return self.import_config(config_file, **kwargs)
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
@@ -660,7 +663,7 @@ class ESPDevice(NETIODevice):
                 "enable": ip_filter_enabled,
                 "ipFrom": ip_from,
                 "ipTo": ip_to,
-            }  # noqa
+            }
         else:
             json_data["ipFilter"] = {"enable": ip_filter_enabled}
         response = esp_api.send_request(self, "setProtocol", data=json_data)

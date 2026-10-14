@@ -72,6 +72,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `PyNetioConf.exceptions`, constants from `PyNetioConf.constants`, and the device classes from their own modules.
   `PyNetioConf` declares `__all__ = ["NetioManager"]`, so `from PyNetioConf import *` imports only `NetioManager`.
 - When a 5.x connection attempt fails, the debug log says why.
+- On 5.x firmware, `netio_push_api_push_now` raises `FeatureNotSupported` instead of `NotImplementedError`. 5.x
+  firmware has no supported way to push on demand; it pushes on its period and when the current changes. Code that
+  catches `NotImplementedError` around the call has to catch `FeatureNotSupported`.
 
 ### Deprecated
 
@@ -90,13 +93,16 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   newer. On 2.x.x-4.x.x devices, the 5.0.x beta and 5.1.x only a file opened in binary mode worked, although 5.1.x
   declared a path. `NETIODevice.update_firmware` documents the parameter and that it returns the device object for
   the new firmware.
+- `import_config` takes the path of the configuration file on every firmware version, as it already did on 5.2.x and
+  newer. On 2.x.x-4.x.x devices, the 5.0.x beta and 5.1.x only an open file worked. `NETIODevice.import_config`
+  documents the paths and files it takes.
 - `update_firmware` on 2.x.x-4.x.x devices raises `CommunicationError` when the device has no `NetioManager` to create
   the updated device object, instead of `AttributeError`, as on 5.x.
 - Certificate and key uploads (`esp_api.send_file`, used for the MQTT and HTTPS certificates) no longer fail with
   `UnboundLocalError` when they retry an HTTPS server key or certificate after a failed attempt. An upload path of a
   kind the library doesn't know raises `CommunicationError` instead of `UnboundLocalError`.
-- `create_rule`, `create_pab` and `create_watchdog` raise `ElementAlreadyExists` when the name is taken, instead of
-  `RuntimeError: No active exception to reraise`.
+- `create_rule`, `create_pab`, `create_watchdog` and `create_schedule` raise `ElementAlreadyExists` when the name is
+  taken, instead of `RuntimeError: No active exception to reraise`.
 - `examples/usage_example.py` calls `get_output_states()`, the `get_socket_states()` it called no longer exists.
 - Ctrl-C stops the program while `init_device` detects the firmware version and during `esp_api.check_connectivity`.
   Both caught every exception, `KeyboardInterrupt` included; now `check_connectivity` catches only request errors and
