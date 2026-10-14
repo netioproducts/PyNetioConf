@@ -163,3 +163,13 @@ class ESP540Device(ESP520Device):
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
         self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
+
+    @override
+    def get_output_states(self) -> list[tuple[int, bool]]:
+        # outputs/state came with firmware 5.4.0, older 5.x firmware has the states only in outputs/measure
+        ws_type = "SUBSCRIBE"
+        ws_topic = "outputs/state"
+
+        self.logger.debug(f"Fetching output states from device {self.host}")
+        items = ws_api.send_request(self, ws_type, ws_topic)["data"]["items"]
+        return [(int(item["id"]), item["state"] == "on") for item in items]

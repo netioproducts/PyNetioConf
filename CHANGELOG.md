@@ -168,6 +168,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   sessions, and firmware 5.4.0 restarts when a new connection finds them all taken. The connections left behind by
   failed login attempts, reconnects, device objects that failed to initialize and the exit of the program are closed as
   well.
+- On 5.x firmware, `get_output_state(output_id)` raises `InvalidSocketIndex` for an output the device doesn't have. It
+  took the output at that position in the list without checking the id, so 0 returned the state of the last output and
+  an id above the number of outputs raised `IndexError`. Code that caught `IndexError` has to catch
+  `InvalidSocketIndex`.
 
 ## [0.3.0b1] - 2026-10-05
 

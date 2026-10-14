@@ -1329,7 +1329,14 @@ class ESP500Device(NETIODevice):
     @override
     def get_output_state(self, output_id: int) -> bool:
         self.logger.debug(f"Fetching output {output_id} state from device {self.host}")
-        return self.get_output_states()[output_id - 1][1]  # TODO: Polish
+        # Looked up in the reply rather than checked against output_count, which doesn't count the outputs of NBUS
+        # clients
+        states = dict(self.get_output_states())
+        if output_id not in states:
+            raise InvalidSocketIndex(
+                f"You tried to access output {output_id}, the device {self.host} has the outputs {sorted(states)}."
+            )
+        return states[output_id]
 
     def set_mqttflex_state(self, state: bool | None = None, config: dict[str, Any] | None = None) -> None:
         ws_type = "SET"

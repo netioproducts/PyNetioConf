@@ -173,6 +173,11 @@ class NETIODevice(ABC):
         Returns
         -------
             A boolean indicating if the output is on.
+
+        Raises
+        ------
+        InvalidSocketIndex
+            The device has no output with this id.
         """
         pass
 
