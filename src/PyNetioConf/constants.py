@@ -43,6 +43,11 @@ ONLINE_UPDATE_ATTEMPTS = 3  # How often the device tries the download before it 
 ONLINE_UPDATE_RETRY_WAIT = 60  # How long a device back from a failed attempt may take to start the next one
 ONLINE_UPDATE_RETRY_INTERVAL = 1  # Time between two reads of system/lock while waiting for the next attempt
 
+# set_server_settings: a change of the web server settings restarts the device about 3 s after the request, and it is
+# reachable again about 10 s after that
+WEB_SERVER_RESTART_TIMEOUT = 60  # How long set_server_settings waits for the device to come back
+WEB_SERVER_RESTART_INTERVAL = 2  # Time between two login attempts while the device restarts
+
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive

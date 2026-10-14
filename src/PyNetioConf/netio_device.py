@@ -1878,7 +1878,8 @@ class NETIODevice(ABC):
         and once more when it marks itself installed after getting a network address. This method returns after both.
 
         The network settings are reset too. A device that had a static IP address can come back at another address,
-        and logging back in then fails.
+        and logging back in then fails. The device comes back with its HTTP server on port 80 and HTTPS switched off,
+        so a device object connected over HTTPS switches to HTTP. One with a port written into host can't follow.
 
         Raises
         ------
@@ -1964,7 +1965,37 @@ class NETIODevice(ABC):
         https_port: int | None = None,
     ) -> None:
         """
-        Sets web server HTTP / HTTPS ports and enablement configuration.
+        Sets which web server the device runs, HTTP or HTTPS, and their ports. The device runs one of them, not both:
+        enabling one disables the other. Arguments left at None keep the device's current values.
+
+        Any change restarts the device. This method waits until the device is back and logs in again, over HTTPS after
+        a switch to HTTPS and over HTTP after a switch back, which takes 15 to 25 seconds. Settings the device already
+        has aren't sent, so they don't restart it.
+
+        Parameters
+        ----------
+        http_enable : bool | None
+            Run the HTTP server. False runs the HTTPS server instead.
+        http_port : int | None
+            Port of the HTTP server.
+        https_enable : bool | None
+            Run the HTTPS server. False runs the HTTP server instead.
+        https_port : int | None
+            Port of the HTTPS server.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            http_enable and https_enable are both True or both False.
+        NotImplementedError
+            The server the device would run listens on another port than the one the device object connects on: 80
+            for HTTP, 443 for HTTPS, or the port written into host. The device object can't follow it there yet.
+            Nothing is sent.
+        PermissionError
+            The device refused the change for the logged-in user.
+        CommunicationError
+            The device refused the change for another reason, or wasn't back within WEB_SERVER_RESTART_TIMEOUT
+            seconds.
         """
         pass
 

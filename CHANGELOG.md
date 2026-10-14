@@ -23,6 +23,7 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   again as admin with the default password admin, which the device object uses from then on. The device restarts twice,
   the second time when it marks itself installed; `load_defaults()` returns after both, about a minute after the
   request. The network settings are reset too, so a device with a static IP address can come back at another address.
+  The device runs HTTP on port 80 again, and a device object connected over HTTPS switches to HTTP.
   Checked on 5.4.0. On 2.x.x-4.x.x devices and the 5.0.x beta it raises `NotImplementedError`. The timing is set by
   `LOAD_DEFAULTS_GRACE_PERIOD`, `LOAD_DEFAULTS_RETRY_INTERVAL`, `LOAD_DEFAULTS_SETTLE_UPTIME` and
   `LOAD_DEFAULTS_TIMEOUT`, and the default credentials are `DEFAULT_USERNAME` and `DEFAULT_PASSWORD` in `constants`.
@@ -97,6 +98,14 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   looks for that item has to check for an empty list.
 - On 5.2.x and newer, `upload_mqtt_client_key`, `upload_mqtt_client_certificate` and `upload_mqtt_ca_certificate` send
   the file in chunks of 2048 bytes, like the web interface, instead of the whole file in one message.
+- On 5.x firmware, `set_server_settings` waits until the device is back after the change, which restarts it, and logs
+  in again, 15 to 25 seconds after the request (`WEB_SERVER_RESTART_TIMEOUT`, `WEB_SERVER_RESTART_INTERVAL`). It used
+  to return at once. Settings the device already has aren't sent, since any change restarts the device. The device
+  runs either HTTP or HTTPS, so `http_enable` and `https_enable` both `True` or both `False` raise
+  `InvalidParameterValueError`, where the device used to pick one. A change that would leave the device's server on
+  another port than the one the device object connects on raises `NotImplementedError` before anything is sent. A
+  refused change raises `PermissionError` or `CommunicationError`. Code that called it with both servers enabled, or
+  that moved the server to another port, has to be changed.
 
 ### Deprecated
 
@@ -201,6 +210,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - On 5.2.x and newer, `upload_https_private_key` and `upload_https_certificate` failed with `KeyError: 'uploadPath'`
   before uploading anything. Since 5.2.0 the device takes these files over the WebSocket in chunks, like the firmware
   update and the configuration import, and the methods now upload them that way.
+- On 5.x firmware, after `set_server_settings` switched the device between HTTP and HTTPS, the device object went on
+  connecting the old way and failed with `CommunicationError` after a minute. It now switches `use_https` with the
+  device. Device objects created over HTTP get the same SSL options as ones created over HTTPS, so they can connect
+  over HTTPS after the switch.
 
 ## [0.3.0b1] - 2026-10-05
 

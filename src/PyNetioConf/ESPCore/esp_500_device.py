@@ -56,6 +56,8 @@ from ..constants import (
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
     USER_PRIVILEGES,
+    WEB_SERVER_RESTART_INTERVAL,
+    WEB_SERVER_RESTART_TIMEOUT,
     NetworkMode,
     OutputAction,
     PushProtocol,
@@ -98,6 +100,26 @@ def _auth_or_current(auth: tuple[str, str] | None, current: dict[str, Any], pref
     if auth is not None:
         return auth
     return current[f"{prefix}Username"], current[f"{prefix}Password"]
+
+
+def _raise_if_refused(response: dict[str, Any], host: str, action: str) -> None:
+    """Raises PermissionError when the device refused a request as Unauthorized, CommunicationError for other errors."""
+    status = response.get("status")
+    if status is not None and status != "OK":
+        error: dict[str, Any] = response.get("error", {})
+        code = error.get("code", status)
+        message = f"Device {host} refused to {action}: {code}"
+        if code == "Unauthorized":
+            raise PermissionError(message)
+        raise CommunicationError(message)
+
+
+def _port_in_host(host: str) -> int | None:
+    """Returns the port written into host, such as 8080 in 192.168.1.10:8080 or [fe80::1]:8080, None without one."""
+    after_address = host.rsplit("]", 1)[-1]
+    if after_address.count(":") != 1:
+        return None
+    return int(after_address.split(":")[1])
 
 
 class ESP500Device(NETIODevice):
@@ -1785,18 +1807,14 @@ class ESP500Device(NETIODevice):
             self._ka_thread.cancel()
             self._ka_thread.join()
         response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        status = response.get("status")
-        if status is not None and status != "OK":
-            error: dict[str, Any] = response.get("error", {})
-            code = error.get("code", status)
-            message = f"Device {self.host} refused to load the default configuration: {code}"
-            if code == "Unauthorized":
-                raise PermissionError(message)
-            raise CommunicationError(message)
+        _raise_if_refused(response, self.host, "load the default configuration")
         requested = perf_counter()
         # The device restarts on its own, this connection ends with it
         ws_api.close_connection(self.ws, graceful=False)
         self.ws = None
+        # The default network settings run the HTTP server on port 80 and switch HTTPS off. Logins over HTTP fail until
+        # the restart, which the wait counts as the device going down.
+        self.use_https = False
         self._log_in_after_defaults(requested)
 
     def _log_in_after_defaults(self, requested: float) -> None:
@@ -1927,17 +1945,86 @@ class ESP500Device(NETIODevice):
     ) -> None:
         ws_type = "SET"
         ws_topic = "network/servers/config"
-        # TODO: make sure to change the https settings if it's toggled to https and vice versa
 
         self.logger.debug(f"Setting web server settings on device {self.host}")
+        if http_enable is not None and http_enable == https_enable:
+            raise InvalidParameterValueError(
+                f"Device {self.host} runs either HTTP or HTTPS, http_enable and https_enable can't both be "
+                f"{http_enable}."
+            )
         current = self._require_config(self.get_server_settings(), "web server")
+        # The device turns one server off when the other one is turned on, so the request names exactly one of them
+        if https_enable is not None:
+            use_https = https_enable
+        elif http_enable is not None:
+            use_https = not http_enable
+        else:
+            use_https = bool(current["httpsEnable"])
         ws_data: dict[str, Any] = {
-            "httpEnable": _value_or_current(http_enable, current, "httpEnable"),
+            "httpEnable": not use_https,
             "httpPort": _value_or_current(http_port, current, "httpPort"),
-            "httpsEnable": _value_or_current(https_enable, current, "httpsEnable"),
+            "httpsEnable": use_https,
             "httpsPort": _value_or_current(https_port, current, "httpsPort"),
         }
-        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        if all(ws_data[key] == current[key] for key in ws_data):
+            # Any change restarts the device, so settings it already has aren't sent
+            self.logger.debug(f"Device {self.host} already has these web server settings, nothing sent")
+            return
+
+        scheme = "HTTPS" if use_https else "HTTP"
+        server_port = ws_data["httpsPort"] if use_https else ws_data["httpPort"]
+        connection_port = _port_in_host(self.host) or (443 if use_https else 80)
+        if server_port != connection_port:
+            raise NotImplementedError(
+                f"The device object connects to {self.host} on port {connection_port}, PyNetioConf can't follow the "
+                f"{scheme} server to port {server_port} yet."
+            )
+
+        # The keep-alive would log in again while the device restarts
+        if self._ka_thread:
+            self._ka_thread.cancel()
+            self._ka_thread.join()
+        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        _raise_if_refused(response, self.host, "change the web server settings")
+        requested = perf_counter()
+        # The device restarts on its own, this connection ends with it
+        ws_api.close_connection(self.ws, graceful=False)
+        self.ws = None
+        if use_https and not self.use_https:
+            from urllib3 import disable_warnings
+            from urllib3.exceptions import InsecureRequestWarning
+
+            disable_warnings(category=InsecureRequestWarning)
+        self.use_https = use_https
+        self._log_in_after_web_server_restart(requested)
+
+    def _log_in_after_web_server_restart(self, requested: float) -> None:
+        """
+        Waits until the device has restarted after a change of its web server settings and logs in again, over HTTPS
+        when use_https is set. requested is the perf_counter() time at which the device accepted the change.
+        """
+        scheme = "HTTPS" if self.use_https else "HTTP"
+        last_error: Exception | None = None
+        while perf_counter() - requested < WEB_SERVER_RESTART_TIMEOUT:
+            sleep(WEB_SERVER_RESTART_INTERVAL)
+            try:
+                self.login(self.username, self.password)
+            except CommunicationError as e:
+                last_error = e
+                continue
+            # Without a restart since the request, the uptime is at least the time since then, less up to 1 s because
+            # the device counts whole seconds
+            if self.get_uptime() < perf_counter() - requested - 1:
+                self.logger.info(f"Device {self.host} is back with its {scheme} server")
+                return
+            # This login reached the device before it restarted
+            self.logout()
+            last_error = None
+        detail = f"last login attempt: {last_error}" if last_error else "it hadn't restarted"
+        raise CommunicationError(
+            f"Device {self.host} wasn't back with its {scheme} server {WEB_SERVER_RESTART_TIMEOUT} seconds after the "
+            f"change of its web server settings, {detail}"
+        )
 
     @override
     def get_global_measurement(self) -> dict[str, Any]:

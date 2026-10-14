@@ -178,7 +178,8 @@ def initialize_esp(
     ssl_options: dict[str, Any] = {}
     try:
         try_count = 3 if not kwargs.get("ws_expected", False) else 15
-        ssl_options = _setup_ssl(**kwargs)[1] if use_https else {}
+        # Built over HTTP as well, so the device object has them when set_server_settings switches it to HTTPS
+        ssl_options = _setup_ssl(**kwargs)[1]
 
         ws = _try_connect_websocket(host, use_https, try_count, **kwargs)
         ws_req_id = 0
