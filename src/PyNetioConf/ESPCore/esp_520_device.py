@@ -167,48 +167,58 @@ class ESP520Device(ESP500Device):
         self.supported_features["eth"] = _system_info["ethSupport"]
         self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
 
-    # TODO: Handle repeated code for uploading files using chunking
+    # Since 5.2.0 the upload topics reply with an uploadId, and the file goes over the WebSocket through upload/chunk
     @override
     def upload_mqtt_client_key(self, key: str) -> None:
-        import base64
-
         ws_type = "SET"
         ws_topic = "protocols/mqtt/clientkeyupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
         upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
-        original_bytes = key.encode("utf-8")
-        base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(self, base64_string, 0, len(key), len(key), upload_id)
+        ws_api.upload_file(self, io.BytesIO(key.encode("utf-8")), upload_id)
 
     @override
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
-        import base64
-
         ws_type = "SET"
         ws_topic = "protocols/mqtt/cacertupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
         upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
-        original_bytes = ca.encode("utf-8")
-        base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(self, base64_string, 0, len(ca), len(ca), upload_id)
+        ws_api.upload_file(self, io.BytesIO(ca.encode("utf-8")), upload_id)
 
     @override
     def upload_mqtt_client_certificate(self, cert: str) -> None:
-        import base64
-
         ws_type = "SET"
         ws_topic = "protocols/mqtt/clientcertupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
         upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
-        original_bytes = cert.encode("utf-8")
-        base64_string = base64.b64encode(original_bytes).decode("utf-8")
-        ws_api.chunk_file_upload(self, base64_string, 0, len(cert), len(cert), upload_id)
+        ws_api.upload_file(self, io.BytesIO(cert.encode("utf-8")), upload_id)
+
+    @override
+    def upload_https_private_key(self, keyfile: str) -> None:
+        ws_type = "SET"
+        ws_topic = "system/srvkeyupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading HTTPS private key to device {self.host}.")
+        with open(keyfile, "rb") as file:
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+            ws_api.upload_file(self, file, upload_id)
+
+    @override
+    def upload_https_certificate(self, certfile: str) -> None:
+        ws_type = "SET"
+        ws_topic = "system/srvcertupload"
+        ws_data: dict[str, Any] = {}
+
+        self.logger.debug(f"Uploading HTTPS certificate to device {self.host}.")
+        with open(certfile, "rb") as file:
+            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+            ws_api.upload_file(self, file, upload_id)
 
     @override
     def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:

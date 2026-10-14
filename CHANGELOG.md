@@ -95,6 +95,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - On 5.x firmware, `get_firmware_updates_list()` returns an empty list when there is no newer firmware. It used to
   return the device's item named "No new firmware available", with an empty version and empty download links. Code that
   looks for that item has to check for an empty list.
+- On 5.2.x and newer, `upload_mqtt_client_key`, `upload_mqtt_client_certificate` and `upload_mqtt_ca_certificate` send
+  the file in chunks of 2048 bytes, like the web interface, instead of the whole file in one message.
 
 ### Deprecated
 
@@ -196,6 +198,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   few seconds, and raises `CommunicationError` when the device gets none (`FIRMWARE_LIST_TIMEOUT`, 60 seconds). It used
   to read the list right after asking for the check, so it returned the answer of the previous check, or an item with
   empty fields when the device hadn't checked since it started.
+- On 5.2.x and newer, `upload_https_private_key` and `upload_https_certificate` failed with `KeyError: 'uploadPath'`
+  before uploading anything. Since 5.2.0 the device takes these files over the WebSocket in chunks, like the firmware
+  update and the configuration import, and the methods now upload them that way.
 
 ## [0.3.0b1] - 2026-10-05
 
