@@ -40,6 +40,20 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `get_xml_api_state`, `get_urlapi_state`, `create_rule`, `delete_rule_by_name`, `create_pab` and `create_watchdog`,
   which 5.x devices already had, are part of `NETIODevice` now, so they show up for any device `init_device` returns.
   On 2.x.x-4.x.x devices and the 5.0.x beta they raise `NotImplementedError`.
+- `update_firmware_online(include_low_level_system=False, version=None)` updates a 5.x device to firmware the NETIO
+  update server offers, the newest by default, like "Update device firmware" and "Update incl. low-level system" in the
+  web interface. The device downloads the firmware itself; the method waits until it runs the new version and returns
+  the device object for it, or this object when no newer firmware is offered. Only firmware the server offers is
+  installed: a `version` it doesn't offer raises `ElementNotFound` before anything is sent. A failed download restarts
+  the device too; when it doesn't start another attempt within a minute of coming back, the method raises
+  `CommunicationError`. The timing is set by `ONLINE_UPDATE_START_TIMEOUT`, `ONLINE_UPDATE_TIMEOUT`,
+  `ONLINE_UPDATE_INTERVAL`, `ONLINE_UPDATE_ATTEMPTS`, `ONLINE_UPDATE_RETRY_WAIT` and `ONLINE_UPDATE_RETRY_INTERVAL` in
+  `constants`. `update_firmware_incl_low_level_online(version=None)` is a shortcut for it with
+  `include_low_level_system=True`, and `is_update_available()` returns whether the server offers newer firmware, so
+  `if device.is_update_available(): device = device.update_firmware_online()` updates a device when there is something
+  to update to. `get_firmware_updates_list()`, and through it the other two, reuses an answer younger than
+  `FIRMWARE_LIST_CACHE_TIME` (120 seconds) instead of checking again, so that runs one check. On 2.x.x-4.x.x devices and
+  the 5.0.x beta all three raise `FeatureNotSupported`.
 
 ### Changed
 
@@ -74,6 +88,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - When a 5.x connection attempt fails, the debug log says why.
 - On 5.x firmware, `netio_push_api_push_now` raises `FeatureNotSupported` instead of `NotImplementedError`. 5.x
   firmware has no supported way to push on demand; it pushes on its period and when the current changes. Code that
+  catches `NotImplementedError` around the call has to catch `FeatureNotSupported`.
+- On 2.x.x-4.x.x devices and the 5.0.x beta, `get_firmware_updates_list` raises `FeatureNotSupported` instead of
+  `NotImplementedError`. That firmware can't check for updates itself; NETIO Cloud starts its online updates. Code that
   catches `NotImplementedError` around the call has to catch `FeatureNotSupported`.
 - On 5.x firmware, `get_firmware_updates_list()` returns an empty list when there is no newer firmware. It used to
   return the device's item named "No new firmware available", with an empty version and empty download links. Code that

@@ -1990,7 +1990,9 @@ class NETIODevice(ABC):
         Has the device check the NETIO update server for newer firmware, like "Check for update" in the web interface,
         and waits for the answer, which takes a few seconds. NETIO Cloud doesn't have to be enabled for it.
 
-        When a check fails after an earlier one succeeded, the device keeps the earlier answer, and this returns it.
+        An answer younger than FIRMWARE_LIST_CACHE_TIME seconds (2 minutes) is reused instead of checking again, also
+        by is_update_available() and update_firmware_online(). When a check fails after an earlier one succeeded, the
+        device keeps the earlier answer, and this returns it.
 
         Returns
         -------
@@ -2003,6 +2005,92 @@ class NETIODevice(ABC):
         CommunicationError
             The device got no answer from the update server, or none within FIRMWARE_LIST_TIMEOUT seconds (5.x
             firmware).
+        FeatureNotSupported
+            The firmware is older than 5.1.0. There the NETIO Cloud starts online updates, and the device can't check
+            for them itself.
+        """
+        pass
+
+    @abstractmethod
+    def is_update_available(self) -> bool:
+        """
+        Has the device check the NETIO update server for newer firmware through get_firmware_updates_list(), which takes
+        a few seconds. The answer is reused for FIRMWARE_LIST_CACHE_TIME seconds, so update_firmware_online() right
+        after this doesn't check again.
+
+        Returns
+        -------
+            True when the server offers newer firmware, which update_firmware_online() installs.
+
+        Raises
+        ------
+        CommunicationError
+            The device got no answer from the update server, or none within FIRMWARE_LIST_TIMEOUT seconds.
+        FeatureNotSupported
+            The firmware is older than 5.1.0.
+        """
+        pass
+
+    @abstractmethod
+    def update_firmware_online(
+        self, include_low_level_system: bool = False, version: str | None = None
+    ) -> "NETIODevice":
+        """
+        Updates the device to firmware the NETIO update server offers, like "Update device firmware" in the web
+        interface, and waits until the device runs it. The device downloads the firmware itself and restarts. This
+        takes a few minutes, and the device can't be reached in between. A failed download restarts the device as well.
+        The device may try again after that restart, ONLINE_UPDATE_ATTEMPTS attempts in all; when it doesn't start
+        another attempt within ONLINE_UPDATE_RETRY_WAIT seconds, the update counts as failed.
+
+        Parameters
+        ----------
+        include_low_level_system : bool
+            Also update the low-level system (the MCU firmware), like "Update incl. low-level system" in the web
+            interface.
+        version : str | None
+            The version to install, such as "5.3.2", one of the versions get_firmware_updates_list() returns. Only
+            firmware the server offers is installed. None installs the newest one on offer.
+
+        Returns
+        -------
+            The device object for the updated firmware. NetioManager creates it anew, and it can be of another class
+            than this one, so use it in place of this object. When no version is requested and the server offers no
+            newer firmware, nothing is updated and this object is returned.
+
+        Raises
+        ------
+        ElementNotFound
+            The server doesn't offer the requested version. Nothing is sent to start an update.
+        CommunicationError
+            The device didn't start the update, came back from a failed attempt and didn't start another, didn't run
+            the new firmware after its last attempt, or not within ONLINE_UPDATE_TIMEOUT seconds.
+        FeatureNotSupported
+            The firmware is older than 5.1.0. There the NETIO Cloud starts online updates, not the device.
+        """
+        pass
+
+    @abstractmethod
+    def update_firmware_incl_low_level_online(self, version: str | None = None) -> "NETIODevice":
+        """
+        Updates the device and its low-level system (the MCU firmware) to firmware the NETIO update server offers, like
+        "Update incl. low-level system" in the web interface. A shortcut for
+        update_firmware_online(include_low_level_system=True), see there.
+
+        Parameters
+        ----------
+        version : str | None
+            The version to install, such as "5.3.2", which the server has to offer. None installs the newest one on
+            offer.
+
+        Returns
+        -------
+            The device object for the updated firmware, or this object when no version is requested and the server
+            offers no newer firmware.
+
+        Raises
+        ------
+        ElementNotFound
+            The server doesn't offer the requested version. Nothing is sent to start an update.
         """
         pass
 

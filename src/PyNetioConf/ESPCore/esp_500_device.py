@@ -39,6 +39,7 @@ from ..constants import (
     DEFAULT_PASSWORD,
     DEFAULT_REQUEST_QUEUE_LEN,
     DEFAULT_USERNAME,
+    FIRMWARE_LIST_CACHE_TIME,
     FIRMWARE_LIST_INTERVAL,
     FIRMWARE_LIST_SETTLE,
     FIRMWARE_LIST_TIMEOUT,
@@ -46,6 +47,12 @@ from ..constants import (
     LOAD_DEFAULTS_RETRY_INTERVAL,
     LOAD_DEFAULTS_SETTLE_UPTIME,
     LOAD_DEFAULTS_TIMEOUT,
+    ONLINE_UPDATE_ATTEMPTS,
+    ONLINE_UPDATE_INTERVAL,
+    ONLINE_UPDATE_RETRY_INTERVAL,
+    ONLINE_UPDATE_RETRY_WAIT,
+    ONLINE_UPDATE_START_TIMEOUT,
+    ONLINE_UPDATE_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
     USER_PRIVILEGES,
@@ -193,6 +200,9 @@ class ESP500Device(NETIODevice):
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        # Last answer of get_firmware_updates_list() and its perf_counter() time, reused for FIRMWARE_LIST_CACHE_TIME
+        self._firmware_list: list[dict[str, Any]] | None = None
+        self._firmware_list_time = 0.0
 
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
@@ -1953,15 +1963,23 @@ class ESP500Device(NETIODevice):
         ws_topic = "system/firmwarelist"
         ws_data = {"getFirmwareList": True, "updateFw": ""}
 
+        # A check takes a few seconds, so a recent answer is reused, for example by update_firmware_online() right
+        # after is_update_available(). Copies, so a caller changing them doesn't change the stored answer
+        age = perf_counter() - self._firmware_list_time
+        if self._firmware_list is not None and age < FIRMWARE_LIST_CACHE_TIME:
+            self.logger.debug(f"Using the firmware updates device {self.host} got {age:.0f} seconds ago")
+            return [dict(item) for item in self._firmware_list]
         self.logger.debug(f"Checking for firmware updates on device {self.host}")
         before = self._get_firmware_list()
         sleep(FIRMWARE_LIST_INTERVAL)
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        items = self._wait_for_firmware_list(before)
+        items: list[dict[str, Any]] = self._wait_for_firmware_list(before)
         # Without newer firmware the device lists one item, "No new firmware available", without version or links
         if all(not item["version"] and not item["downloadUrl"] and not item["downloadUrlNoMcu"] for item in items):
-            return []
-        return items
+            items = []
+        self._firmware_list = items
+        self._firmware_list_time = perf_counter()
+        return [dict(item) for item in items]
 
     def _get_firmware_list(self) -> list[dict[str, Any]]:
         ws_type = "SUBSCRIBE"
@@ -2010,6 +2028,133 @@ class ESP500Device(NETIODevice):
         raise CommunicationError(
             f"Device {self.host} got no answer from the firmware update server within {FIRMWARE_LIST_TIMEOUT} seconds"
         )
+
+    @override
+    def is_update_available(self) -> bool:
+        self.logger.debug(f"Checking whether newer firmware is available for device {self.host}")
+        return len(self.get_firmware_updates_list()) > 0
+
+    @override
+    def update_firmware_online(self, include_low_level_system: bool = False, version: str | None = None) -> NETIODevice:
+        ws_type = "SET"
+        ws_topic = "system/firmwarelist"
+
+        self.logger.debug(f"Starting the online firmware update on device {self.host}")
+        offers = self.get_firmware_updates_list()
+        # Only firmware the update server offers is installed, nothing is sent for a version it doesn't offer
+        if version is not None:
+            matching = [item for item in offers if item["version"].split()[0] == version]
+            if not matching:
+                offered = ", ".join(item["version"] for item in offers) or "nothing"
+                raise ElementNotFound(
+                    f"The update server doesn't offer firmware {version} for device {self.host}, it offers {offered}"
+                )
+            offer = matching[0]
+        elif not offers:
+            self.logger.info(f"The update server offers no newer firmware for device {self.host}, nothing to update")
+            return self
+        else:
+            # The server lists the newest firmware first
+            offer = offers[0]
+        target = offer["version"].split()[0]
+        ws_data = {
+            "getFirmwareList": False,
+            "updateFw": offer["downloadUrl"] if include_low_level_system else offer["downloadUrlNoMcu"],
+        }
+        if self._ka_thread:
+            self._ka_thread.cancel()
+            self._ka_thread.join()
+
+        sleep(FIRMWARE_LIST_INTERVAL)
+        uptime = self.get_uptime()
+        sleep(FIRMWARE_LIST_INTERVAL)
+        self.logger.info(f"Updating device {self.host} to {offer['name']} from {ws_data['updateFw']}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self._wait_for_online_update(target, uptime)
+
+        if not isinstance(self.netio_manager, NetioManager):
+            raise CommunicationError(
+                f"Device {self.host} runs firmware {target} now, but has no NetioManager to create its device object"
+            )
+        return self.netio_manager.update_device(self)
+
+    @override
+    def update_firmware_incl_low_level_online(self, version: str | None = None) -> NETIODevice:
+        self.logger.debug(f"Starting the online firmware update including the low-level system on device {self.host}")
+        return self.update_firmware_online(include_low_level_system=True, version=version)
+
+    def _wait_for_online_update(self, target: str, uptime: int) -> None:
+        """
+        Waits until the device runs firmware version target after the online update was started. uptime is the
+        device's uptime from just before.
+
+        The device locks system/lock while it downloads and restarts when the download ends, also after a failed one.
+        The firmware is written to try again after the restart, ONLINE_UPDATE_ATTEMPTS attempts in all, but with NETIO
+        Cloud disabled 5.4.0 didn't, so a failed attempt counts as the last one unless the device starts another within
+        ONLINE_UPDATE_RETRY_WAIT seconds. A restart shows as a later boot time worked out from the uptime. A busy
+        device reports its uptime a few seconds late, so the boot time has to move by more than two intervals.
+        """
+        deadline = perf_counter() + ONLINE_UPDATE_START_TIMEOUT
+        while self.get_system_lock()["op"] != "lock":
+            if perf_counter() >= deadline:
+                raise CommunicationError(f"Device {self.host} didn't start the online firmware update")
+            sleep(FIRMWARE_LIST_INTERVAL)
+
+        booted_at = perf_counter() - uptime
+        restarts = 0
+        deadline = perf_counter() + ONLINE_UPDATE_TIMEOUT
+        while perf_counter() < deadline:
+            sleep(ONLINE_UPDATE_INTERVAL)
+            try:
+                current = self.get_uptime()
+                if perf_counter() - current - booted_at <= 2 * ONLINE_UPDATE_INTERVAL:
+                    continue
+                booted_at = perf_counter() - current
+                restarts += 1
+                running = self.get_system_info()["fwVersion"].split()[0]
+            except CommunicationError:
+                # Down for longer than ws_api keeps reconnecting, the next round tries again
+                continue
+            if running == target:
+                self.logger.info(f"Device {self.host} runs firmware {target} after {restarts} restart(s)")
+                return
+            self.logger.warning(
+                f"Device {self.host} restarted with firmware {running}, attempt {restarts} of {ONLINE_UPDATE_ATTEMPTS} "
+                f"to update to {target} failed"
+            )
+            if restarts >= ONLINE_UPDATE_ATTEMPTS:
+                raise CommunicationError(
+                    f"Device {self.host} still runs firmware {running} after {restarts} attempts to update to {target}"
+                )
+            if not self._online_update_retried(booted_at):
+                raise CommunicationError(
+                    f"Device {self.host} restarted with firmware {running} and didn't try the update to {target} again "
+                    f"within {ONLINE_UPDATE_RETRY_WAIT} seconds"
+                )
+        raise CommunicationError(
+            f"Device {self.host} doesn't run firmware {target} {ONLINE_UPDATE_TIMEOUT} seconds after the online update "
+            "started"
+        )
+
+    def _online_update_retried(self, booted_at: float) -> bool:
+        """
+        Whether the device starts another attempt of the online update within ONLINE_UPDATE_RETRY_WAIT seconds after it
+        came back from a failed one: it locks system/lock again, can't be reached, or restarted in between. booted_at
+        is the boot time _wait_for_online_update worked out from the uptime.
+        """
+        deadline = perf_counter() + ONLINE_UPDATE_RETRY_WAIT
+        while perf_counter() < deadline:
+            sleep(ONLINE_UPDATE_RETRY_INTERVAL)
+            try:
+                if self.get_system_lock()["op"] == "lock":
+                    return True
+            except CommunicationError:
+                return True
+        # An attempt that failed between two reads has restarted the device again
+        try:
+            return perf_counter() - self.get_uptime() - booted_at > 2 * ONLINE_UPDATE_INTERVAL
+        except CommunicationError:
+            return True
 
     @override
     def get_system_lock(self) -> dict[str, Any]:

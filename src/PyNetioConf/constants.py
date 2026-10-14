@@ -31,6 +31,17 @@ USER_LIST_SYNC_INTERVAL = 0.5  # Time between two checks of users/list while wai
 FIRMWARE_LIST_TIMEOUT = 60  # How long get_firmware_updates_list waits for the update server's answer
 FIRMWARE_LIST_INTERVAL = 0.2  # Time between two reads of system/lock or fwupdate/list while waiting
 FIRMWARE_LIST_SETTLE = 2  # How long the list has to stay unchanged after the unlock to count as the same answer
+FIRMWARE_LIST_CACHE_TIME = 120  # How long get_firmware_updates_list reuses its last answer instead of checking again
+
+# update_firmware_online: the device downloads the firmware, restarts and boots it. A failed download restarts it as
+# well. The firmware is written to try again after the restart, 3 attempts in all, but 5.4.0 with NETIO Cloud disabled
+# didn't
+ONLINE_UPDATE_START_TIMEOUT = 10  # How long the device may take to lock system/lock for the update
+ONLINE_UPDATE_TIMEOUT = 900  # How long update_firmware_online waits for the device to run the new firmware
+ONLINE_UPDATE_INTERVAL = 5  # Time between two reads of the uptime while waiting
+ONLINE_UPDATE_ATTEMPTS = 3  # How often the device tries the download before it gives up
+ONLINE_UPDATE_RETRY_WAIT = 60  # How long a device back from a failed attempt may take to start the next one
+ONLINE_UPDATE_RETRY_INTERVAL = 1  # Time between two reads of system/lock while waiting for the next attempt
 
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback

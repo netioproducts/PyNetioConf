@@ -127,6 +127,9 @@ class ESP520Device(ESP500Device):
 
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        # Last answer of get_firmware_updates_list() and its perf_counter() time, reused for FIRMWARE_LIST_CACHE_TIME
+        self._firmware_list: list[dict[str, Any]] | None = None
+        self._firmware_list_time = 0.0
 
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)

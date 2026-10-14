@@ -1361,8 +1361,26 @@ class ESPDevice(NETIODevice):
 
     @override
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:
-        raise NotImplementedError(
+        raise FeatureNotSupported(
             "get_firmware_updates_list is only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def is_update_available(self) -> bool:
+        raise FeatureNotSupported(
+            "Checking for firmware updates is only supported on firmware 5.1.0 and newer, please update your device."
+        )
+
+    @override
+    def update_firmware_online(self, include_low_level_system: bool = False, version: str | None = None) -> NETIODevice:
+        raise FeatureNotSupported(
+            "The online firmware update is only supported on firmware 5.1.0 and newer, please update your device."
+        )
+
+    @override
+    def update_firmware_incl_low_level_online(self, version: str | None = None) -> NETIODevice:
+        raise FeatureNotSupported(
+            "The online firmware update is only supported on firmware 5.1.0 and newer, please update your device."
         )
 
     @override
