@@ -1801,10 +1801,46 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def upload_https_private_key(self, keyfile: str) -> None:
+        """
+        Uploads the private key of the device's HTTPS server, a PEM file. Upload the matching certificate with
+        upload_https_certificate as well.
+
+        The device reads its HTTPS key and certificate only when the HTTPS server starts, at boot. Restart the device
+        after uploading both, for example with system_reset(). Until then an HTTPS server that is already running keeps
+        the old key and certificate.
+
+        Parameters
+        ----------
+        keyfile : str
+            Path of the PEM file with the private key.
+
+        Raises
+        ------
+        FeatureNotSupported
+            The device runs firmware older than 5.0.0.
+        """
         pass
 
     @abstractmethod
     def upload_https_certificate(self, certfile: str) -> None:
+        """
+        Uploads the certificate of the device's HTTPS server, a PEM file. It has to match the private key uploaded with
+        upload_https_private_key.
+
+        The device reads its HTTPS key and certificate only when the HTTPS server starts, at boot. Restart the device
+        after uploading both, for example with system_reset(). Until then an HTTPS server that is already running keeps
+        the old key and certificate.
+
+        Parameters
+        ----------
+        certfile : str
+            Path of the PEM file with the certificate.
+
+        Raises
+        ------
+        FeatureNotSupported
+            The device runs firmware older than 5.0.0.
+        """
         pass
 
     @abstractmethod

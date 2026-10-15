@@ -7,6 +7,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ## [Unreleased]
 
+### Changed
+
+- `upload_https_private_key` and `upload_https_certificate` are documented, including that the device uses a new key and
+  certificate only after a restart.
+
 ## [0.3.1] - 2026-10-15
 
 ### Added
