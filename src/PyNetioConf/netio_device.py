@@ -669,6 +669,11 @@ class NETIODevice(ABC):
     def locate(self) -> None:
         """
         Blinks the LED on the device for a period of time.
+
+        Raises
+        ------
+        FeatureNotSupported
+            On firmware 5.1.x, which can't be told to blink over the WebSocket API. That came with 5.2.0.
         """
         pass
 
@@ -1902,6 +1907,11 @@ class NETIODevice(ABC):
     def system_reset(self) -> None:
         """
         Triggers an immediate system reset (reboot).
+
+        Raises
+        ------
+        FeatureNotSupported
+            On firmware 5.1.x, which can't be restarted over the WebSocket API. That came with 5.2.0.
         """
         pass
 

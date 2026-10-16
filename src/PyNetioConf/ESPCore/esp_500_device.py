@@ -15,7 +15,6 @@ from xml.etree.ElementTree import Element
 from PyNetioConf.constants import (
     CLOUD_ACTION_COMMUNICATION_DELAY,
     CLOUD_DEFAULT_CONNECTION_WAIT,
-    DEVICE_RESET_GRACE_PERIOD,
     WS_DEFAULT_TIMEOUT,
 )
 
@@ -1635,12 +1634,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def locate(self) -> None:
-        ws_type = "SET"
-        ws_topic = "system/locate"
-        ws_data = {"locate": True}
-
-        self.logger.debug(f"Locating device {self.host}")
-        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        raise FeatureNotSupported("Locating the device is only supported on firmware 5.2.0 and newer.")
 
     @override
     def clear_system_log(self) -> None:
@@ -1787,13 +1781,7 @@ class ESP500Device(NETIODevice):
 
     @override
     def system_reset(self) -> None:
-        ws_type = "SET"
-        ws_topic = "system/reset"
-        ws_data = {"reset": True}
-
-        self.logger.debug(f"Triggering system reset (reboot) on device {self.host}")
-        ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        sleep(DEVICE_RESET_GRACE_PERIOD)
+        raise FeatureNotSupported("Restarting the device is only supported on firmware 5.2.0 and newer.")
 
     @override
     def load_defaults(self) -> None:

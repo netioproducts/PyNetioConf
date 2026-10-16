@@ -14,6 +14,7 @@ from time import sleep, time
 from ..constants import (
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_REQUEST_QUEUE_LEN,
+    DEVICE_RESET_GRACE_PERIOD,
 )
 
 if sys.version_info >= (3, 12):
@@ -369,6 +370,25 @@ class ESP520Device(ESP500Device):
                 file.write(conf_string)
 
         return config_export
+
+    @override
+    def locate(self) -> None:
+        ws_type = "SET"
+        ws_topic = "system/locate"
+        ws_data = {"locate": True}
+
+        self.logger.debug(f"Locating device {self.host}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def system_reset(self) -> None:
+        ws_type = "SET"
+        ws_topic = "system/reset"
+        ws_data = {"reset": True}
+
+        self.logger.debug(f"Triggering system reset (reboot) on device {self.host}")
+        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        sleep(DEVICE_RESET_GRACE_PERIOD)
 
     @override
     def _keep_alive(self) -> None:

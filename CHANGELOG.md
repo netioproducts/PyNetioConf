@@ -11,6 +11,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 - `upload_https_private_key` and `upload_https_certificate` are documented, including that the device uses a new key and
   certificate only after a restart.
+- On firmware 5.1.x, `system_reset()` and `locate()` raise `FeatureNotSupported`. 5.1.x doesn't have the
+  `system/reset` and `system/locate` topics, which came with 5.2.0, so the device answered with an error and the methods
+  returned as if it had restarted or blinked. This breaks code that calls them on 5.1.x without catching
+  `FeatureNotSupported`.
 
 ## [0.3.1] - 2026-10-15
 
