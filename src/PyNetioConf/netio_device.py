@@ -536,7 +536,8 @@ class NETIODevice(ABC):
              but doesn't save a file.
         Returns
         -------
-            The JSON configuration.
+            The JSON configuration in the firmware's own export form, which import_config() takes back:
+            {"config": {<group>: ...}} on 5.1.x, {<group>: {<group>: ...}} on 5.2.x and newer.
         """
         pass
 

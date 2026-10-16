@@ -16,6 +16,14 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   returned as if it had restarted or blinked. This breaks code that calls them on 5.1.x without catching
   `FeatureNotSupported`.
 
+### Fixed
+
+- `update_firmware()` works on firmware 5.1.x. It used the deprecated `/api` and failed before uploading.
+- `get_firmware_updates_list()`, `is_update_available()` and `update_firmware_online()` no longer raise
+  `KeyError: 'items'` on firmware 5.1.x.
+- `export_config()` returns a dict on firmware 5.1.x instead of a JSON string, and `save_file` no longer encodes it
+  twice. This breaks code that parses the returned string.
+
 ## [0.3.1] - 2026-10-15
 
 ### Added

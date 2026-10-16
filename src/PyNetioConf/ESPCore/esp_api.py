@@ -22,7 +22,9 @@ def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
 
     try:
         logger.debug(f"Checking connection health of {fw_object.host}.")
-        response = requests.get(f"{protocol}://{fw_object.host}", timeout=timeout, verify=False)
+        # Headers only: 5.x pads its gzipped page, which urllib3 can't decode
+        response = requests.get(f"{protocol}://{fw_object.host}", timeout=timeout, verify=False, stream=True)
+        response.close()
     except requests.RequestException:
         logger.warn(f"Couldn't connect to device {fw_object.host}.")
         return -1

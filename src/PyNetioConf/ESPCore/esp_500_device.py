@@ -1412,11 +1412,12 @@ class ESP500Device(NETIODevice):
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Exporting configuration from device {self.host}")
-        config = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        # 5.1.x sends the configuration as a JSON string
+        config: dict[str, Any] = json.loads(ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["config"])
         if save_file:
             with open(save_file, "w") as file:
-                json.dump(config["data"]["config"], file)
-        return config["data"]["config"]
+                json.dump(config, file, ensure_ascii=False, indent=4)
+        return config
 
     def import_config(self, file: str | os.PathLike[str] | io.BufferedIOBase | io.TextIOBase, **kwargs: Any) -> None:
         ws_type = "SET"
@@ -1450,6 +1451,10 @@ class ESP500Device(NETIODevice):
 
     @override
     def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
+        ws_type = "SET"
+        ws_topic = "system/fwupdate"
+        ws_data: dict[str, Any] = {}
+
         if isinstance(file, (str, os.PathLike)):
             with open(file, "rb") as firmware_file:
                 return self.update_firmware(firmware_file)
@@ -1470,15 +1475,10 @@ class ESP500Device(NETIODevice):
             pre_reconnect_wait = pre_reconnect_wait * 2
             self.logger.debug("Increased wait time after firmware update due to poor connection quality.")
 
-        _ = esp_api.send_request(self, "prepFwUpgrade")
-        _ = esp_api.send_file(self, "/upload/firmware", file)
-        try:
-            _ = esp_api.send_request(self, "startUpgrade", close=True)
-        except CommunicationError:
-            self.logger.warn(
-                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if "
-                "the device connects, waiting for connection."
-            )
+        self.logger.debug(f"Uploading firmware to device {self.host}")
+        # The device closes this session after replying and restarts when the upload ends
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
+        _ = esp_api.send_file(self, upload_path, file)
         self.logger.debug(
             f"Uploaded firmware {getattr(file, 'name', 'in-memory file')}, device {self.host} might be unresponsive "
             "for a while."
@@ -1500,7 +1500,7 @@ class ESP500Device(NETIODevice):
 
         updated_instance = None
         if isinstance(self.netio_manager, NetioManager):
-            updated_instance = self.netio_manager.update_device(self)
+            updated_instance = self.netio_manager.update_device(self, ws_expected=True)
 
         if not updated_instance:
             raise CommunicationError("Coudln't get updated instance.")
@@ -2060,7 +2060,9 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "fwupdate/list"
 
-        return ws_api.send_request(self, ws_type, ws_topic)["data"]["items"]
+        data: dict[str, Any] = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        # 5.1.3 leaves out items while it rebuilds the list
+        return data["items"] if "items" in data else []
 
     def _wait_for_firmware_list(self, before: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
@@ -2068,9 +2070,9 @@ class ESP500Device(NETIODevice):
         is the list from just before the request.
 
         The device locks system/lock while it asks the server, unlocks when the request ends and rebuilds the list
-        about 0.4 s later, so a read around the unlock can get the previous list or a partial one. Until the first
-        answer since the device started, the list holds one item with empty fields. A list that differs from before
-        counts once two reads in a row agree. A list that doesn't differ counts as the same answer once it stayed
+        about 0.4 s later, so a read around the unlock can get the previous list, a partial one, or on 5.1.3 none. Until
+        the first answer since the device started, the list holds one item with empty fields. A list that differs from
+        before counts once two reads in a row agree. A list that doesn't differ counts as the same answer once it stayed
         unchanged for FIRMWARE_LIST_SETTLE seconds after the unlock.
         """
         fields = ("name", "version", "downloadUrl", "downloadUrlNoMcu", "releaseNoteEn")
