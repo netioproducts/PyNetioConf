@@ -9,7 +9,7 @@ from io import BufferedIOBase
 from time import perf_counter, sleep
 from typing import Any, NamedTuple
 
-from websocket import WebSocket, WebSocketConnectionClosedException
+from websocket import WebSocket, WebSocketConnectionClosedException, WebSocketTimeoutException
 
 from PyNetioConf.constants import (
     WS_EXECUTION_DELAY,
@@ -262,12 +262,21 @@ def _gen_file_chunks(file_obj: BufferedIOBase, chunk_size: int = 2048) -> Genera
         current_byte += chunk_len
 
 
-def upload_file(device: NETIODevice, file: BufferedIOBase, upload_id: str):
+def upload_file(
+    device: NETIODevice, file: BufferedIOBase, upload_id: str, last_reply_timeout: float | None = None
+) -> None:
+    """
+    Sends the file through upload/chunk. Set last_reply_timeout when the device restarts once the upload ends: the last
+    chunk's reply is awaited that long, and a missing one is taken for the restart.
+    """
     CHUNK_SIZE = 2048
     file_chunks = list(_gen_file_chunks(file, CHUNK_SIZE))
     chunks_total = len(file_chunks)
     total_size = sum(chunk.original_len for chunk in file_chunks)
     for chunk in file_chunks:
+        if chunk.index == chunks_total - 1 and last_reply_timeout is not None:
+            _upload_last_chunk(device, chunk, total_size, upload_id, chunks_total, last_reply_timeout)
+            return
         uploaded_chunk = chunk_file_upload(
             device,
             chunk.base64,
@@ -280,6 +289,32 @@ def upload_file(device: NETIODevice, file: BufferedIOBase, upload_id: str):
             False if chunk.index < (chunks_total - 1) else True,
         )
         sleep(0.3)
+
+
+def _upload_last_chunk(
+    device: NETIODevice, chunk: _FileChunk, total_size: int, upload_id: str, chunks_total: int, reply_timeout: float
+) -> None:
+    """Sends the last chunk of an upload after which the device restarts. A missing reply is taken for the restart."""
+    if device.ws is None:
+        raise CommunicationError("No websocket connection associated with the device")
+    timeout = device.ws.gettimeout()
+    device.ws.settimeout(reply_timeout)
+    try:
+        _ = chunk_file_upload(
+            device,
+            chunk.base64,
+            chunk.bytes_from,
+            chunk.bytes_to,
+            total_size,
+            upload_id,
+            chunk.index,
+            chunks_total,
+            True,
+        )
+    except (WebSocketTimeoutException, WebSocketConnectionClosedException, ConnectionResetError, BrokenPipeError) as e:
+        logger.debug(f"Device {device.host} didn't reply to the last chunk ({type(e).__name__}), it is restarting")
+    else:
+        device.ws.settimeout(timeout)
 
 
 def chunk_file_upload(

@@ -9,9 +9,10 @@ import os
 import sys
 from collections import deque
 from pathlib import Path
-from time import sleep, time
+from time import perf_counter, sleep, time
 
 from ..constants import (
+    CONFIG_IMPORT_REPLY_TIMEOUT,
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_REQUEST_QUEUE_LEN,
     DEVICE_RESET_GRACE_PERIOD,
@@ -322,8 +323,13 @@ class ESP520Device(ESP500Device):
             raise TypeError(f"Unsupported file type {type(file).__name__}, expected a path or a file object.")
 
         self.logger.debug(f"Importing configuration to host {self.host}")
+        if self._ka_thread:
+            self._ka_thread.cancel()
+            self._ka_thread.join()
         upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
-        ws_api.upload_file(self, file, upload_id)
+        requested = perf_counter()
+        ws_api.upload_file(self, file, upload_id, last_reply_timeout=CONFIG_IMPORT_REPLY_TIMEOUT)
+        self._log_in_after_import(requested, **kwargs)
 
     @override
     def ping(self) -> bool:

@@ -29,11 +29,14 @@ import logging
 import threading
 import warnings
 
+import requests
 import websocket
 from websocket import WebSocket
 
 from .. import NetioManager
 from ..constants import (
+    CONFIG_IMPORT_REPLY_TIMEOUT,
+    CONFIG_IMPORT_RESTART_TIMEOUT,
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_PASSWORD,
     DEFAULT_REQUEST_QUEUE_LEN,
@@ -1435,19 +1438,30 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Importing configuration to device {self.host}")
         data = json.load(file)
         encoded_data = json.dumps(data).encode("utf-8")
-        ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        esp_api.send_file(self, "/cfgimport", encoded_data)
-        self.logger.info(
-            f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is "
-            "restarting..."
-        )
-        sleep(kwargs.get("sleep_time", 15))
-        username = kwargs.get("username", self.username)
-        password = kwargs.get("password", self.password)
+        upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
+        requested = perf_counter()
+        try:
+            _ = esp_api.send_file(self, upload_path, encoded_data, timeout=CONFIG_IMPORT_REPLY_TIMEOUT)
+        except (requests.exceptions.Timeout, CommunicationError) as e:
+            # 5.1.3 restarts without replying
+            self.logger.debug(f"Device {self.host} didn't reply to the import ({type(e).__name__}), it is restarting")
+        self._log_in_after_import(requested, **kwargs)
 
-        if kwargs.get("login", True):
-            # logout=True drops the connection that ended with the device restart, login also restarts the keep-alive
-            self.login(username, password, logout=True)
+    def _log_in_after_import(self, requested: float, **kwargs: Any) -> None:
+        """
+        Logs in again once the device has restarted with the imported configuration, with the username and password
+        keywords when given. login=False skips that. requested is the perf_counter() time the upload started.
+        """
+        # The device restarts on its own, this connection ends with it
+        ws_api.close_connection(self.ws, graceful=False)
+        self.ws = None
+        if not kwargs.get("login", True):
+            return
+        self.username = kwargs.get("username", self.username)
+        self.password = kwargs.get("password", self.password)
+        self._log_in_after_restart(
+            requested, CONFIG_IMPORT_RESTART_TIMEOUT, "with the imported configuration", "the configuration import"
+        )
 
     @override
     def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
@@ -1984,16 +1998,17 @@ class ESP500Device(NETIODevice):
 
             disable_warnings(category=InsecureRequestWarning)
         self.use_https = use_https
-        self._log_in_after_web_server_restart(requested)
+        self._log_in_after_restart(
+            requested, WEB_SERVER_RESTART_TIMEOUT, f"with its {scheme} server", "the change of its web server settings"
+        )
 
-    def _log_in_after_web_server_restart(self, requested: float) -> None:
+    def _log_in_after_restart(self, requested: float, timeout: float, back: str, cause: str) -> None:
         """
-        Waits until the device has restarted after a change of its web server settings and logs in again, over HTTPS
-        when use_https is set. requested is the perf_counter() time at which the device accepted the change.
+        Waits until the device has restarted after requested, a perf_counter() time, and logs in again. back and cause
+        complete the messages, such as "with its HTTPS server" and "the change of its web server settings".
         """
-        scheme = "HTTPS" if self.use_https else "HTTP"
         last_error: Exception | None = None
-        while perf_counter() - requested < WEB_SERVER_RESTART_TIMEOUT:
+        while perf_counter() - requested < timeout:
             sleep(WEB_SERVER_RESTART_INTERVAL)
             try:
                 self.login(self.username, self.password)
@@ -2003,16 +2018,13 @@ class ESP500Device(NETIODevice):
             # Without a restart since the request, the uptime is at least the time since then, less up to 1 s because
             # the device counts whole seconds
             if self.get_uptime() < perf_counter() - requested - 1:
-                self.logger.info(f"Device {self.host} is back with its {scheme} server")
+                self.logger.info(f"Device {self.host} is back {back}")
                 return
             # This login reached the device before it restarted
             self.logout()
             last_error = None
         detail = f"last login attempt: {last_error}" if last_error else "it hadn't restarted"
-        raise CommunicationError(
-            f"Device {self.host} wasn't back with its {scheme} server {WEB_SERVER_RESTART_TIMEOUT} seconds after the "
-            f"change of its web server settings, {detail}"
-        )
+        raise CommunicationError(f"Device {self.host} wasn't back {back} {timeout} seconds after {cause}, {detail}")
 
     @override
     def get_global_measurement(self) -> dict[str, Any]:

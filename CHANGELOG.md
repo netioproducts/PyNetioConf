@@ -23,6 +23,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `KeyError: 'items'` on firmware 5.1.x.
 - `export_config()` returns a dict on firmware 5.1.x instead of a JSON string, and `save_file` no longer encodes it
   twice. This breaks code that parses the returned string.
+- `import_config()` waits for the restart after the import and logs in again. On 5.1.x it raised `ReadTimeout` after
+  600 s, on 5.2.x and newer it could raise `WebSocketTimeoutException` or return before the restart. The `sleep_time`
+  keyword is no longer used.
 
 ## [0.3.1] - 2026-10-15
 

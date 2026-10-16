@@ -48,6 +48,10 @@ ONLINE_UPDATE_RETRY_INTERVAL = 1  # Time between two reads of system/lock while 
 WEB_SERVER_RESTART_TIMEOUT = 60  # How long set_server_settings waits for the device to come back
 WEB_SERVER_RESTART_INTERVAL = 2  # Time between two login attempts while the device restarts
 
+# import_config: the device applies the configuration and restarts, sometimes before it replies to the upload
+CONFIG_IMPORT_REPLY_TIMEOUT = 30  # How long import_config waits for that reply before taking the restart for it
+CONFIG_IMPORT_RESTART_TIMEOUT = 90  # How long import_config waits for the device to come back
+
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive
