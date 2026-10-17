@@ -12,6 +12,8 @@ from typing import Any, NamedTuple
 from websocket import WebSocket, WebSocketConnectionClosedException, WebSocketTimeoutException
 
 from PyNetioConf.constants import (
+    UPLOAD_CHUNK_PAUSE,
+    UPLOAD_CHUNK_TIMEOUT,
     WS_EXECUTION_DELAY,
     WS_RECONNECT_INTERVAL,
     WS_RECONNECT_TIMEOUT,
@@ -262,58 +264,53 @@ def _gen_file_chunks(file_obj: BufferedIOBase, chunk_size: int = 2048) -> Genera
         current_byte += chunk_len
 
 
+# What a chunk that gets no reply raises: a timeout, or a connection the device closed or reset
+_NO_REPLY = (WebSocketTimeoutException, WebSocketConnectionClosedException, ConnectionResetError, BrokenPipeError)
+
+
 def upload_file(
     device: NETIODevice, file: BufferedIOBase, upload_id: str, last_reply_timeout: float | None = None
 ) -> None:
     """
-    Sends the file through upload/chunk. Set last_reply_timeout when the device restarts once the upload ends: the last
-    chunk's reply is awaited that long, and a missing one is taken for the restart.
+    Sends the file through upload/chunk. Raises CommunicationError when the device refuses or doesn't answer a chunk.
+    Set last_reply_timeout when the device restarts once the upload ends: the last chunk's reply is awaited that long,
+    and a missing one is taken for the restart.
     """
+    if device.ws is None:
+        raise CommunicationError("No websocket connection associated with the device")
     CHUNK_SIZE = 2048
     file_chunks = list(_gen_file_chunks(file, CHUNK_SIZE))
     chunks_total = len(file_chunks)
     total_size = sum(chunk.original_len for chunk in file_chunks)
-    for chunk in file_chunks:
-        if chunk.index == chunks_total - 1 and last_reply_timeout is not None:
-            _upload_last_chunk(device, chunk, total_size, upload_id, chunks_total, last_reply_timeout)
-            return
-        uploaded_chunk = chunk_file_upload(
-            device,
-            chunk.base64,
-            chunk.bytes_from,
-            chunk.bytes_to,
-            total_size,
-            upload_id,
-            chunk.index,
-            chunks_total,
-            False if chunk.index < (chunks_total - 1) else True,
-        )
-        sleep(0.3)
-
-
-def _upload_last_chunk(
-    device: NETIODevice, chunk: _FileChunk, total_size: int, upload_id: str, chunks_total: int, reply_timeout: float
-) -> None:
-    """Sends the last chunk of an upload after which the device restarts. A missing reply is taken for the restart."""
-    if device.ws is None:
-        raise CommunicationError("No websocket connection associated with the device")
     timeout = device.ws.gettimeout()
-    device.ws.settimeout(reply_timeout)
     try:
-        _ = chunk_file_upload(
-            device,
-            chunk.base64,
-            chunk.bytes_from,
-            chunk.bytes_to,
-            total_size,
-            upload_id,
-            chunk.index,
-            chunks_total,
-            True,
-        )
-    except (WebSocketTimeoutException, WebSocketConnectionClosedException, ConnectionResetError, BrokenPipeError) as e:
-        logger.debug(f"Device {device.host} didn't reply to the last chunk ({type(e).__name__}), it is restarting")
-    else:
+        for chunk in file_chunks:
+            last = chunk.index == chunks_total - 1
+            restarts = last and last_reply_timeout is not None
+            device.ws.settimeout(last_reply_timeout if restarts else UPLOAD_CHUNK_TIMEOUT)
+            position = f"chunk {chunk.index + 1} of {chunks_total}"
+            try:
+                reply = chunk_file_upload(
+                    device,
+                    chunk.base64,
+                    chunk.bytes_from,
+                    chunk.bytes_to,
+                    total_size,
+                    upload_id,
+                    chunk.index,
+                    chunks_total,
+                    last,
+                )
+            except _NO_REPLY as e:
+                if restarts:
+                    logger.debug(f"Device {device.host} didn't answer the last chunk ({type(e).__name__}), restarting")
+                    return
+                raise CommunicationError(f"Device {device.host} didn't answer {position} ({type(e).__name__})") from e
+            if reply["status"] != "OK":
+                raise CommunicationError(f"Device {device.host} refused {position}: {reply}")
+            if not last:
+                sleep(UPLOAD_CHUNK_PAUSE)
+    finally:
         device.ws.settimeout(timeout)
 
 
@@ -357,11 +354,16 @@ def chunk_file_upload(
     if device.ws is None:
         raise CommunicationError("No websocket connection associated with the device")
     logger.debug(f"Sending request to {device.host} with payload {_debug_request}")
+    req_id = ws_request["reqId"]
     device.ws.send(json.dumps(ws_request, ensure_ascii=False))
     device.ws_req_id += 1
-    chunk_reply = device.ws.recv()
-    logger.debug(f"Received response from {device.host} with payload {chunk_reply}")
-    return json.loads(chunk_reply)
+    while True:
+        chunk_reply = device.ws.recv()
+        logger.debug(f"Received response from {device.host} with payload {chunk_reply}")
+        reply: dict[str, Any] = json.loads(chunk_reply)
+        # Events and late replies to earlier requests come in between
+        if "reqId" in reply and reply["reqId"] == req_id:
+            return reply
 
 
 def generate_salt() -> str:

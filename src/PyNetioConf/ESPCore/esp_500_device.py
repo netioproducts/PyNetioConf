@@ -35,7 +35,6 @@ from websocket import WebSocket
 
 from .. import NetioManager
 from ..constants import (
-    CONFIG_IMPORT_REPLY_TIMEOUT,
     CONFIG_IMPORT_RESTART_TIMEOUT,
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_PASSWORD,
@@ -55,6 +54,7 @@ from ..constants import (
     ONLINE_UPDATE_RETRY_WAIT,
     ONLINE_UPDATE_START_TIMEOUT,
     ONLINE_UPDATE_TIMEOUT,
+    UPLOAD_RESTART_REPLY_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
     USER_PRIVILEGES,
@@ -1441,7 +1441,7 @@ class ESP500Device(NETIODevice):
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         requested = perf_counter()
         try:
-            _ = esp_api.send_file(self, upload_path, encoded_data, timeout=CONFIG_IMPORT_REPLY_TIMEOUT)
+            _ = esp_api.send_file(self, upload_path, encoded_data, timeout=UPLOAD_RESTART_REPLY_TIMEOUT)
         except (requests.exceptions.Timeout, CommunicationError) as e:
             # 5.1.3 restarts without replying
             self.logger.debug(f"Device {self.host} didn't reply to the import ({type(e).__name__}), it is restarting")

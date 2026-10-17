@@ -12,10 +12,10 @@ from pathlib import Path
 from time import perf_counter, sleep, time
 
 from ..constants import (
-    CONFIG_IMPORT_REPLY_TIMEOUT,
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_REQUEST_QUEUE_LEN,
     DEVICE_RESET_GRACE_PERIOD,
+    UPLOAD_RESTART_REPLY_TIMEOUT,
 )
 
 if sys.version_info >= (3, 12):
@@ -224,6 +224,10 @@ class ESP520Device(ESP500Device):
 
     @override
     def update_firmware(self, file: str | os.PathLike[str] | io.BufferedIOBase) -> NETIODevice:
+        ws_type = "SET"
+        ws_topic = "system/fwupdate"
+        ws_data: dict[str, Any] = {}
+
         if isinstance(file, (str, os.PathLike)):
             with open(file, "rb") as firmware_file:
                 return self.update_firmware(firmware_file)
@@ -259,18 +263,8 @@ class ESP520Device(ESP500Device):
         #         "Increased wait time after firmware update due to poor connection quality."
         #     )
 
-        try:
-            ws_type = "SET"
-            ws_topic = "system/fwupdate"
-            ws_data = {}
-            upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
-
-            ws_api.upload_file(self, file, upload_id)
-        except CommunicationError:
-            self.logger.warning(
-                f"Device {self.host} couldn't verify firmware update process beginning, this should be harmless if "
-                "the device connects, waiting for connection."
-            )
+        upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
+        ws_api.upload_file(self, file, upload_id, last_reply_timeout=UPLOAD_RESTART_REPLY_TIMEOUT)
         self.logger.debug(f"Uploaded firmware, device {self.host} might be unresponsive for a while.")
 
         # TODO: Sophisticated
@@ -328,7 +322,7 @@ class ESP520Device(ESP500Device):
             self._ka_thread.join()
         upload_id = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadId"]
         requested = perf_counter()
-        ws_api.upload_file(self, file, upload_id, last_reply_timeout=CONFIG_IMPORT_REPLY_TIMEOUT)
+        ws_api.upload_file(self, file, upload_id, last_reply_timeout=UPLOAD_RESTART_REPLY_TIMEOUT)
         self._log_in_after_import(requested, **kwargs)
 
     @override

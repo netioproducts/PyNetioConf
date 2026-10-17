@@ -26,6 +26,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `import_config()` waits for the restart after the import and logs in again. On 5.1.x it raised `ReadTimeout` after
   600 s, on 5.2.x and newer it could raise `WebSocketTimeoutException` or return before the restart. The `sleep_time`
   keyword is no longer used.
+- Uploads on 5.2.x and newer (firmware, configuration import, keys and certificates) raise `CommunicationError` naming
+  the chunk when the device refuses or doesn't answer it. A refused chunk passed silently, and a missing reply raised a
+  bare WebSocket error. `update_firmware()` no longer ignores a failed upload.
+- Uploads on 5.2.x and newer pause 0.1 s between chunks instead of 0.3 s.
 
 ## [0.3.1] - 2026-10-15
 

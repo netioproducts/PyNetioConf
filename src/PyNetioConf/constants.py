@@ -48,8 +48,10 @@ ONLINE_UPDATE_RETRY_INTERVAL = 1  # Time between two reads of system/lock while 
 WEB_SERVER_RESTART_TIMEOUT = 60  # How long set_server_settings waits for the device to come back
 WEB_SERVER_RESTART_INTERVAL = 2  # Time between two login attempts while the device restarts
 
-# import_config: the device applies the configuration and restarts, sometimes before it replies to the upload
-CONFIG_IMPORT_REPLY_TIMEOUT = 30  # How long import_config waits for that reply before taking the restart for it
+# Uploads. After a firmware update or a configuration import the device restarts, sometimes before it replies
+UPLOAD_CHUNK_TIMEOUT = 30  # How long a chunk waits for its reply
+UPLOAD_CHUNK_PAUSE = 0.1  # Time between two chunks
+UPLOAD_RESTART_REPLY_TIMEOUT = 30  # How long the upload before a restart waits for its reply, then takes the restart
 CONFIG_IMPORT_RESTART_TIMEOUT = 90  # How long import_config waits for the device to come back
 
 # WebSocket 5.0.0+ communication constants
