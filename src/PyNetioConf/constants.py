@@ -54,6 +54,12 @@ UPLOAD_CHUNK_PAUSE = 0.1  # Time between two chunks
 UPLOAD_RESTART_REPLY_TIMEOUT = 30  # How long the upload before a restart waits for its reply, then takes the restart
 CONFIG_IMPORT_RESTART_TIMEOUT = 90  # How long import_config waits for the device to come back
 
+# Output delays in milliseconds, as the web interface takes them. It allows 4294967296 too, which doesn't fit the
+# device's 32-bit value
+OUTPUT_RESET_DELAY_MIN = 100
+OUTPUT_POWER_UP_INTERVAL_MIN = 0
+OUTPUT_DELAY_MAX = 4294967295
+
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive
@@ -70,6 +76,17 @@ class OutputAction(StrEnum):
     SHORT_ON = "son"  # On for the reset delay, then off
     SHORT_OFF = "soff"  # Off for the reset delay, then on
     TOGGLE = "toggle"
+
+
+class OutputPowerUpState(StrEnum):
+    """
+    The state an output takes when the device powers up after a power loss, set_output_power_up_state(). A restart of
+    the device keeps the outputs as they are.
+    """
+
+    ON = "on"
+    OFF = "off"
+    LAST = "last"  # The state before the power loss
 
 
 # The choices of the protocol and network setters. The setters take the plain strings as well, the members are strings.

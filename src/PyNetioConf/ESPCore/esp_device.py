@@ -24,6 +24,7 @@ import requests
 from ..constants import (
     NetworkMode,
     OutputAction,
+    OutputPowerUpState,
     PushProtocol,
     SnmpAuthProtocol,
     SnmpPrivProtocol,
@@ -215,6 +216,12 @@ class ESPDevice(NETIODevice):
 
     def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
         raise NotImplementedError("set_output_reset_delay is not implemented for legacy ESP devices")
+
+    def set_output_power_up_state(self, output_id: int, state: OutputPowerUpState) -> None:
+        raise NotImplementedError("set_output_power_up_state is not implemented for legacy ESP devices")
+
+    def set_output_power_up_interval(self, output_id: int, power_up_interval: int) -> None:
+        raise NotImplementedError("set_output_power_up_interval is not implemented for legacy ESP devices")
 
     def set_output_schedule(self, output_id: int, schedule_id: int, enabled: bool | None = None) -> None:
         if enabled is None:
@@ -436,6 +443,11 @@ class ESPDevice(NETIODevice):
     def reset_output_consumption_counter(self, output_id: int) -> None:
         # TODO: Implement reset_output_consumption_counter for legacy ESP devices
         raise NotImplementedError("reset_output_consumption_counter is not implemented for legacy ESP devices")
+
+    def reset_global_consumption_counter(self) -> None:
+        raise NotImplementedError(
+            "reset_global_consumption_counter is only available for devices 5.x.x and up, please update your device."
+        )
 
     def set_system_settings(
         self,

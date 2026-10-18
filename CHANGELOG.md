@@ -7,8 +7,17 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ## [Unreleased]
 
+### Added
+
+- `set_output_power_up_state(output_id, state)` with an `OutputPowerUpState` from `constants` (`ON`, `OFF`, `LAST`), and
+  `set_output_power_up_interval(output_id, power_up_interval)` in milliseconds, on 5.x firmware.
+- `reset_global_consumption_counter()` resets the consumption counter of all outputs together on 5.x firmware.
+
 ### Changed
 
+- `set_output_reset_delay` raises `InvalidParameterValueError` for delays outside 100 to 4294967295 ms, the range the
+  web interface takes. It took any delay above 0, which breaks code that passes 1 to 99.
+- `rename_output` raises `InvalidParameterValueError` when the name isn't a string.
 - `upload_https_private_key` and `upload_https_certificate` are documented, including that the device uses a new key and
   certificate only after a restart.
 - On firmware 5.1.x, `system_reset()` and `locate()` raise `FeatureNotSupported`. 5.1.x doesn't have the

@@ -17,6 +17,7 @@ from websocket import WebSocket
 from .constants import (
     NetworkMode,
     OutputAction,
+    OutputPowerUpState,
     PushProtocol,
     SnmpAuthProtocol,
     SnmpPrivProtocol,
@@ -277,12 +278,52 @@ class NETIODevice(ABC):
         output_id: int
             The number of the output.
         reset_delay: int
-            The delay in milliseconds, more than 0.
+            The delay in milliseconds, 100 to 4294967295.
 
         Raises
         ------
         InvalidParameterValueError
-            The delay isn't a positive whole number.
+            The delay isn't a whole number in that range.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_power_up_state(self, output_id: int, state: OutputPowerUpState) -> None:
+        """
+        Sets the state the output takes when the device powers up after a power loss (default in get_output_data()). A
+        restart of the device keeps the outputs as they are.
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        state: OutputPowerUpState
+            OutputPowerUpState.ON, OFF or LAST, the state before the power loss.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The state isn't an OutputPowerUpState.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_power_up_interval(self, output_id: int, power_up_interval: int) -> None:
+        """
+        Sets the output's power-up interval (powerUpInterval in get_output_data(), "Output PowerUp interval" on the web
+        interface).
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        power_up_interval: int
+            The interval in milliseconds, 0 to 4294967295.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The interval isn't a whole number in that range.
         """
         pass
 
@@ -298,9 +339,10 @@ class NETIODevice(ABC):
         output_name
             The desired name of the output.
 
-        Returns
-        -------
-            None
+        Raises
+        ------
+        InvalidParameterValueError
+            The name isn't a string.
         """
         pass
 
@@ -653,6 +695,14 @@ class NETIODevice(ABC):
         ----------
         output_id : int
             The number of the output to reset counters for.
+        """
+        pass
+
+    @abstractmethod
+    def reset_global_consumption_counter(self) -> None:
+        """
+        Resets the consumption counter of all outputs together (energy and reverseEnergy in get_global_measurement()).
+        The outputs' own counters stay, reset_power_consumption_counters() resets those.
         """
         pass
 

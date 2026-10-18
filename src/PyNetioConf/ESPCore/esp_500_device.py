@@ -54,6 +54,9 @@ from ..constants import (
     ONLINE_UPDATE_RETRY_WAIT,
     ONLINE_UPDATE_START_TIMEOUT,
     ONLINE_UPDATE_TIMEOUT,
+    OUTPUT_DELAY_MAX,
+    OUTPUT_POWER_UP_INTERVAL_MIN,
+    OUTPUT_RESET_DELAY_MIN,
     UPLOAD_RESTART_REPLY_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
@@ -62,6 +65,7 @@ from ..constants import (
     WEB_SERVER_RESTART_TIMEOUT,
     NetworkMode,
     OutputAction,
+    OutputPowerUpState,
     PushProtocol,
     SnmpAuthProtocol,
     SnmpPrivProtocol,
@@ -95,6 +99,16 @@ def _choice_value(choices: type[StrEnum], value: str | None, name: str) -> str |
         raise InvalidParameterValueError(
             f"Unknown {name} {value!r}, the possible ones are {[choice.value for choice in choices]}"
         ) from None
+
+
+def _check_milliseconds(value: int, minimum: int, name: str) -> None:
+    """Raises InvalidParameterValueError unless value is a whole number from minimum to OUTPUT_DELAY_MAX."""
+    # bool is an int as well, but True as 1 ms is surely a mistake
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= OUTPUT_DELAY_MAX:
+        raise InvalidParameterValueError(
+            f"The {name} is in milliseconds and has to be a whole number from {minimum} to {OUTPUT_DELAY_MAX}, "
+            f"not {value!r}"
+        )
 
 
 def _auth_or_current(auth: tuple[str, str] | None, current: dict[str, Any], prefix: str) -> tuple[str, str]:
@@ -579,6 +593,8 @@ class ESP500Device(NETIODevice):
 
     @override
     def rename_output(self, output_id: int, output_name: str) -> None:
+        if not isinstance(output_name, str):
+            raise InvalidParameterValueError(f"The output name has to be a string, not {output_name!r}")
         self.logger.debug(f"Renaming output {output_id} to new name: {output_name}")
         self._set_output_config(output_id, output_name=output_name)
 
@@ -615,14 +631,31 @@ class ESP500Device(NETIODevice):
 
     @override
     def set_output_reset_delay(self, output_id: int, reset_delay: int) -> None:
-        # bool is an int as well, but True as 1 ms is surely a mistake
-        if isinstance(reset_delay, bool) or not isinstance(reset_delay, int) or reset_delay <= 0:
-            raise InvalidParameterValueError(
-                f"The reset delay is in milliseconds and has to be a whole number above 0, not {reset_delay!r}"
-            )
+        _check_milliseconds(reset_delay, OUTPUT_RESET_DELAY_MIN, "reset delay")
         self._check_socket_index(output_id)
         self.logger.debug(f"Setting the reset delay of output {output_id} to {reset_delay} ms on device {self.host}")
         self._set_output_config(output_id, reset_delay=reset_delay)
+
+    @override
+    def set_output_power_up_state(self, output_id: int, state: OutputPowerUpState) -> None:
+        try:
+            default_state = OutputPowerUpState(state).value
+        except ValueError:
+            raise InvalidParameterValueError(
+                f"Unknown power-up state {state!r}, the possible ones are {[s.value for s in OutputPowerUpState]}"
+            ) from None
+        self._check_socket_index(output_id)
+        self.logger.debug(f"Setting the power-up state of output {output_id} to {default_state} on device {self.host}")
+        self._set_output_config(output_id, default_state=default_state)
+
+    @override
+    def set_output_power_up_interval(self, output_id: int, power_up_interval: int) -> None:
+        _check_milliseconds(power_up_interval, OUTPUT_POWER_UP_INTERVAL_MIN, "power-up interval")
+        self._check_socket_index(output_id)
+        self.logger.debug(
+            f"Setting the power-up interval of output {output_id} to {power_up_interval} ms on device {self.host}"
+        )
+        self._set_output_config(output_id, power_up_interval=power_up_interval)
 
     @override
     def set_outputs_unified(self, state: bool) -> None:
@@ -656,6 +689,15 @@ class ESP500Device(NETIODevice):
         for output in range(1, self.output_count + 1):
             self.reset_output_consumption_counter(output)
             sleep(0.1)
+
+    @override
+    def reset_global_consumption_counter(self) -> None:
+        ws_type = "SET"
+        ws_topic = "outputs/globalMeasure/resetOutputConsumption"
+        ws_data = {"request": True}
+
+        self.logger.debug(f"Resetting the global consumption counter on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def get_output_schedule(self, output_id: int) -> dict[str, Any]:
