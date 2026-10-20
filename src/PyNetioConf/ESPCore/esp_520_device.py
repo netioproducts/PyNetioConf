@@ -31,7 +31,7 @@ import threading
 from websocket import WebSocket
 
 from .. import NetioManager
-from ..exceptions import CommunicationError, ElementNotFound
+from ..exceptions import CommunicationError, DeviceError, ElementNotFound
 from ..netio_device import NETIODevice
 from . import ws_api
 from .esp_500_device import ESP500Device
@@ -145,7 +145,7 @@ class ESP520Device(ESP500Device):
         # self.output_count: int = self.supported_features["outputCount"]
         try:
             self.user_permissions = self.get_user_privileges(username)
-        except (CommunicationError, ElementNotFound):
+        except (CommunicationError, DeviceError, ElementNotFound):
             self.logger.warning(
                 f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
             )

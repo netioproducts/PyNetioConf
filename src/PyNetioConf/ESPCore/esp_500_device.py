@@ -74,6 +74,7 @@ from ..constants import (
 from ..exceptions import (
     AuthError,
     CommunicationError,
+    DeviceError,
     ElementAlreadyExists,
     ElementNotFound,
     FeatureNotSupported,
@@ -116,18 +117,6 @@ def _auth_or_current(auth: tuple[str, str] | None, current: dict[str, Any], pref
     if auth is not None:
         return auth
     return current[f"{prefix}Username"], current[f"{prefix}Password"]
-
-
-def _raise_if_refused(response: dict[str, Any], host: str, action: str) -> None:
-    """Raises PermissionError when the device refused a request as Unauthorized, CommunicationError for other errors."""
-    status = response.get("status")
-    if status is not None and status != "OK":
-        error: dict[str, Any] = response.get("error", {})
-        code = error.get("code", status)
-        message = f"Device {host} refused to {action}: {code}"
-        if code == "Unauthorized":
-            raise PermissionError(message)
-        raise CommunicationError(message)
 
 
 def _port_in_host(host: str) -> int | None:
@@ -254,7 +243,7 @@ class ESP500Device(NETIODevice):
         # self.output_count: int = self.supported_features["outputCount"]
         try:
             self.user_permissions = self.get_user_privileges(username)
-        except (CommunicationError, ElementNotFound):
+        except (CommunicationError, DeviceError, ElementNotFound):
             self.logger.warning(
                 f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
             )
@@ -359,7 +348,7 @@ class ESP500Device(NETIODevice):
             if user_changed:
                 try:
                     self.user_permissions = self.get_user_privileges(username)
-                except (CommunicationError, ElementNotFound):
+                except (CommunicationError, DeviceError, ElementNotFound):
                     self.logger.warning(
                         f"Couldn't read the privileges of user {username} on device {self.host}, "
                         "user_permissions is empty."
@@ -1850,8 +1839,7 @@ class ESP500Device(NETIODevice):
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
-        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        _raise_if_refused(response, self.host, "load the default configuration")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
         requested = perf_counter()
         # The device restarts on its own, this connection ends with it
         ws_api.close_connection(self.ws, graceful=False)
@@ -2028,8 +2016,7 @@ class ESP500Device(NETIODevice):
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
-        response = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        _raise_if_refused(response, self.host, "change the web server settings")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
         requested = perf_counter()
         # The device restarts on its own, this connection ends with it
         ws_api.close_connection(self.ws, graceful=False)

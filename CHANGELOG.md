@@ -12,9 +12,16 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `set_output_power_up_state(output_id, state)` with an `OutputPowerUpState` from `constants` (`ON`, `OFF`, `LAST`), and
   `set_output_power_up_interval(output_id, power_up_interval)` in milliseconds, on 5.x firmware.
 - `reset_global_consumption_counter()` resets the consumption counter of all outputs together on 5.x firmware.
+- `DeviceError` and `UnauthorizedError` (also a `PermissionError`) are raised on 5.x firmware when the device answers a
+  request with an error, with the device's `code`, `message` and the request's `topic`. A refused setter returned as if
+  it had succeeded, and a refused getter failed with `KeyError: 'data'`. This breaks code that read a refused reply's
+  `status` itself or expected a refused call to return.
 
 ### Changed
 
+- `load_defaults` and `set_server_settings` raise `UnauthorizedError` and `DeviceError` for a refused request instead of
+  `PermissionError` and `CommunicationError`. `UnauthorizedError` is a `PermissionError`, so only code catching
+  `CommunicationError` for a refusal breaks.
 - `set_output_reset_delay` raises `InvalidParameterValueError` for delays outside 100 to 4294967295 ms, the range the
   web interface takes. It took any delay above 0, which breaks code that passes 1 to 99.
 - `rename_output` raises `InvalidParameterValueError` when the name isn't a string.

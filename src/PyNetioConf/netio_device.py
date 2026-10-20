@@ -1987,11 +1987,12 @@ class NETIODevice(ABC):
 
         Raises
         ------
-        PermissionError
+        UnauthorizedError
             The device refused the request for the logged-in user.
+        DeviceError
+            The device refused the request for another reason.
         CommunicationError
-            The device refused the request for another reason, or didn't come back within LOAD_DEFAULTS_TIMEOUT
-            seconds.
+            The device didn't come back within LOAD_DEFAULTS_TIMEOUT seconds.
         AuthError
             The device came back but refused admin with the default password.
         """
@@ -2095,11 +2096,12 @@ class NETIODevice(ABC):
             The server the device would run listens on another port than the one the device object connects on: 80
             for HTTP, 443 for HTTPS, or the port written into host. The device object can't follow it there yet.
             Nothing is sent.
-        PermissionError
+        UnauthorizedError
             The device refused the change for the logged-in user.
+        DeviceError
+            The device refused the change for another reason.
         CommunicationError
-            The device refused the change for another reason, or wasn't back within WEB_SERVER_RESTART_TIMEOUT
-            seconds.
+            The device wasn't back within WEB_SERVER_RESTART_TIMEOUT seconds.
         """
         pass
 

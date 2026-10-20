@@ -22,6 +22,7 @@ from .. import NetioManager
 from ..constants import DEFAULT_KEEP_ALIVE_QUEUE_LEN, DEFAULT_REQUEST_QUEUE_LEN
 from ..exceptions import (
     CommunicationError,
+    DeviceError,
     ElementNotFound,
 )
 from . import ws_api
@@ -143,7 +144,7 @@ class ESP540Device(ESP520Device):
         # self.output_count: int = self.supported_features["outputCount"]
         try:
             self.user_permissions = self.get_user_privileges(username)
-        except (CommunicationError, ElementNotFound):
+        except (CommunicationError, DeviceError, ElementNotFound):
             self.logger.warning(
                 f"Couldn't read the privileges of user {username} on device {self.host}, user_permissions is empty."
             )

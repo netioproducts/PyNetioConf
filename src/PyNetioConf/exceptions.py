@@ -24,6 +24,28 @@ class CommunicationError(NetioException):
         self.error = error
 
 
+class DeviceError(NetioException):
+    """
+    Raised when the device answers a request with an error (`"status": "ERROR"`). `code` is the device's error code,
+    such as `TopicNotFonud` or `MissingParameter`, `message` the text it sent with it, and `topic` the request's topic.
+    """
+
+    def __init__(self, host: str, ws_type: str, topic: str | None, code: str, message: str = ""):
+        description = f"Device {host} answered {ws_type} {topic or '(no topic)'} with {code}"
+        super().__init__(f"{description}: {message}" if message else description)
+        self.host = host
+        self.ws_type = ws_type
+        self.topic = topic
+        self.code = code
+        self.message = message
+
+
+class UnauthorizedError(DeviceError, PermissionError):
+    """Raised when the device refuses a request as `Unauthorized`: the user lacks the privilege for it."""
+
+    pass
+
+
 class AuthError(NetioException):
     """Raised when the authentication with the Netio device fails"""
 

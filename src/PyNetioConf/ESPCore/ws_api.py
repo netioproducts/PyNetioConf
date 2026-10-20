@@ -19,10 +19,26 @@ from PyNetioConf.constants import (
     WS_RECONNECT_TIMEOUT,
 )
 
-from ..exceptions import AuthError, CommunicationError
+from ..exceptions import AuthError, CommunicationError, DeviceError, UnauthorizedError
 from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
+
+
+def _check_reply(reply: dict[str, Any], host: str, ws_type: str, topic: str | None) -> None:
+    """
+    Raises DeviceError when the device answered the request with an error, UnauthorizedError for the code
+    Unauthorized. A reply without a status passes: only firmware 5.4.0 is checked to send one on every reply.
+    """
+    status = reply.get("status")
+    if status is None or status == "OK":
+        return
+    error: dict[str, Any] = reply.get("error") or {}
+    code = str(error.get("code", status))
+    message = str(error.get("message", "")).rstrip(" :")
+    if code == "Unauthorized":
+        raise UnauthorizedError(host, ws_type, topic, code, message)
+    raise DeviceError(host, ws_type, topic, code, message)
 
 
 class _FileChunk(NamedTuple):
@@ -155,10 +171,9 @@ def send_request(
                 else:
                     logger.debug(f"Ignored event: {message}")
 
-            if message_data:
-                return message_data
-            else:
-                return json.loads(message)
+            reply: dict[str, Any] = message_data if message_data else json.loads(message)
+            _check_reply(reply, device.host, ws_type, ws_topic)
+            return reply
         except (
             BrokenPipeError,
             WebSocketConnectionClosedException,
@@ -176,8 +191,8 @@ def send_request(
             if ws_topic == "system/reset":
                 return {}
             continue
-        except AuthError:
-            # A refused login from reconnecting is not a communication problem, retrying can't fix the credentials
+        except (AuthError, DeviceError):
+            # A refused login from reconnecting, or a request the device refused, is not a communication problem
             raise
         except Exception as e:
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
@@ -510,6 +525,10 @@ def device_init_request(
                 logger.debug(f"Throwing away websocket message: {message}")
                 message = ws.recv()
         logger.debug(f"Received response from {host} with payload {message}")
-        return json.loads(message)
+        reply: dict[str, Any] = json.loads(message)
+        _check_reply(reply, host, type, topic)
+        return reply
+    except DeviceError:
+        raise
     except Exception as e:
         raise CommunicationError(f"Failed to send request to {host}", str(e))
