@@ -22,6 +22,7 @@ from .constants import (
     SnmpAuthProtocol,
     SnmpPrivProtocol,
     SnmpSecurityLevel,
+    TemperatureUnit,
 )
 
 if TYPE_CHECKING:
@@ -62,6 +63,8 @@ class NETIODevice(ABC):
         self.session_id = ""
         self.supported_features: dict[str, Any] = dict()
         self.output_count = 0
+        # The inputs the device has, 0 on firmware older than 5.x
+        self.input_count = 0
         self.user_permissions: list[str] = list()
         self._keep_alive_flag = keep_alive
         self._ka_thread: threading.Timer | None = None
@@ -1920,10 +1923,58 @@ class NETIODevice(ABC):
 
     @abstractmethod
     def get_input_list(self) -> dict[str, Any]:
+        """
+        Returns the device's inputs as the device sends them: {"items": [...]}, each with id, name, state, s0Counter,
+        temperature, temperatureUnit and, from firmware 5.2.0 on, humidity. Without a sensor the temperature is 999.0
+        and the humidity 999.
+        """
         pass
 
     @abstractmethod
     def get_input_data(self, input_id: int) -> dict[str, Any]:
+        """
+        Returns one input's item of get_input_list().
+
+        Raises
+        ------
+        InvalidSocketIndex
+            The device has no input with this number.
+        """
+        pass
+
+    @abstractmethod
+    def rename_input(self, input_id: int, name: str) -> None:
+        """
+        Renames the input (name in get_input_data()).
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The name isn't a string.
+        InvalidSocketIndex
+            The device has no input with this number.
+        """
+        pass
+
+    @abstractmethod
+    def set_input_temperature_unit(self, input_id: int, unit: TemperatureUnit) -> None:
+        """
+        Sets the unit the input's temperature is reported in (temperatureUnit in get_input_data()).
+
+        Parameters
+        ----------
+        input_id: int
+            The number of the input.
+        unit: TemperatureUnit
+            TemperatureUnit.CELSIUS or FAHRENHEIT.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The unit isn't a TemperatureUnit.
+        InvalidSocketIndex
+            The device has no input with this number.
+        """
         pass
 
     # TODO: Review method

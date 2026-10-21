@@ -29,6 +29,7 @@ from ..constants import (
     SnmpAuthProtocol,
     SnmpPrivProtocol,
     SnmpSecurityLevel,
+    TemperatureUnit,
 )
 from ..exceptions import (
     CommunicationError,
@@ -1278,6 +1279,18 @@ class ESPDevice(NETIODevice):
 
     @override
     def get_input_data(self, input_id: int) -> dict[str, Any]:
+        raise NotImplementedError(
+            "Input commands are only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def rename_input(self, input_id: int, name: str) -> None:
+        raise NotImplementedError(
+            "Input commands are only available for devices 5.x.x and up, please update your device."
+        )
+
+    @override
+    def set_input_temperature_unit(self, input_id: int, unit: TemperatureUnit) -> None:
         raise NotImplementedError(
             "Input commands are only available for devices 5.x.x and up, please update your device."
         )

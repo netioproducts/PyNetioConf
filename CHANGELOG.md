@@ -16,6 +16,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   request with an error, with the device's `code`, `message` and the request's `topic`. A refused setter returned as if
   it had succeeded, and a refused getter failed with `KeyError: 'data'`. This breaks code that read a refused reply's
   `status` itself or expected a refused call to return.
+- `rename_input(input_id, name)` and `set_input_temperature_unit(input_id, unit)` with a `TemperatureUnit` from
+  `constants` (`CELSIUS`, `FAHRENHEIT`), on 5.x firmware. `input_count` is declared on `NETIODevice`, 0 below 5.x.
 
 ### Changed
 
@@ -34,6 +36,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Fixed
 
+- `get_input_data()` raises `InvalidSocketIndex` for input numbers below 1. It returned the last input for 0 and
+  negative numbers.
 - `update_firmware()` works on firmware 5.1.x. It used the deprecated `/api` and failed before uploading.
 - `get_firmware_updates_list()`, `is_update_available()` and `update_firmware_online()` no longer raise
   `KeyError: 'items'` on firmware 5.1.x.

@@ -89,6 +89,14 @@ class OutputPowerUpState(StrEnum):
     LAST = "last"  # The state before the power loss
 
 
+class TemperatureUnit(StrEnum):
+    """The unit an input reports its temperature in (temperatureUnit in get_input_data()), set with
+    set_input_temperature_unit()."""
+
+    CELSIUS = "C"
+    FAHRENHEIT = "F"
+
+
 # The choices of the protocol and network setters. The setters take the plain strings as well, the members are strings.
 class NetworkMode(StrEnum):
     """How set_ethernet_settings() gets the device's address."""

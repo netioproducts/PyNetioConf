@@ -70,6 +70,7 @@ from ..constants import (
     SnmpAuthProtocol,
     SnmpPrivProtocol,
     SnmpSecurityLevel,
+    TemperatureUnit,
 )
 from ..exceptions import (
     AuthError,
@@ -1784,14 +1785,48 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_input_data(self, input_id: int) -> dict[str, Any]:
+        self._check_input_index(input_id)
         self.logger.debug(f"Fetching input {input_id} data from device {self.host}")
-        input_list = self.get_input_list()
-        if input_id > len(input_list["items"]):
+        return self.get_input_list()["items"][input_id - 1]
+
+    def _check_input_index(self, input_id: int) -> None:
+        if input_id < 1 or input_id > self.input_count:
             raise InvalidSocketIndex(
-                f"The device doesn't support {input_id} inputs. The input range is <0;{len(input_list['items'])}>"
+                f"You tried to access input with id {input_id}, the device supports <1;{self.input_count}>."
             )
-        else:
-            return input_list["items"][input_id - 1]
+
+    def _set_input_config(self, input_id: int, name: str | None = None, temperature_unit: str | None = None) -> None:
+        ws_topic = f"inputs/inputs/{input_id}/config"
+        ws_type = "SUBSCRIBE"
+
+        self.logger.debug(f"Setting input {input_id} config on device {self.host}")
+        current = self._require_config(ws_api.send_request(self, ws_type, ws_topic)["data"], f"input {input_id}")
+        ws_type = "SET"
+        ws_data = {
+            "name": _value_or_current(name, current, "name"),
+            "temperatureUnit": _value_or_current(temperature_unit, current, "temperatureUnit"),
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    def rename_input(self, input_id: int, name: str) -> None:
+        if not isinstance(name, str):
+            raise InvalidParameterValueError(f"The input name has to be a string, not {name!r}")
+        self._check_input_index(input_id)
+        self.logger.debug(f"Renaming input {input_id} to {name} on device {self.host}")
+        self._set_input_config(input_id, name=name)
+
+    @override
+    def set_input_temperature_unit(self, input_id: int, unit: TemperatureUnit) -> None:
+        try:
+            temperature_unit = TemperatureUnit(unit).value
+        except ValueError:
+            raise InvalidParameterValueError(
+                f"Unknown temperature unit {unit!r}, the possible ones are {[u.value for u in TemperatureUnit]}"
+            ) from None
+        self._check_input_index(input_id)
+        self.logger.debug(f"Setting input {input_id} temperature unit to {temperature_unit} on device {self.host}")
+        self._set_input_config(input_id, temperature_unit=temperature_unit)
 
     @override
     def get_system_datetime(self) -> dict[str, Any]:
