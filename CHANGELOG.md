@@ -18,9 +18,16 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `status` itself or expected a refused call to return.
 - `rename_input(input_id, name)` and `set_input_temperature_unit(input_id, unit)` with a `TemperatureUnit` from
   `constants` (`CELSIUS`, `FAHRENHEIT`), on 5.x firmware. `input_count` is declared on `NETIODevice`, 0 below 5.x.
+- `set_rule(name, enabled, config)`, `set_pab(name, enabled, config)` and `set_watchdog(name, enabled, config)` change
+  an existing rule, PAB or watchdog, `None` keeping what the device has, and `set_schedule(name, intervals)` replaces a
+  schedule's intervals, on 5.x firmware. The device doesn't rename any of them.
+- `delete_watchdog_by_name(name)` on 5.x firmware.
 
 ### Changed
 
+- `get_rule_by_name`, `get_pab_by_name` and `get_watchdog_by_name` return `config` parsed into a dict, the form
+  `create_rule`, `create_pab` and `create_watchdog` take. It was the device's JSON string, which breaks code that parsed
+  it itself.
 - `load_defaults` and `set_server_settings` raise `UnauthorizedError` and `DeviceError` for a refused request instead of
   `PermissionError` and `CommunicationError`. `UnauthorizedError` is a `PermissionError`, so only code catching
   `CommunicationError` for a refusal breaks.

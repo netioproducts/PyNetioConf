@@ -733,6 +733,33 @@ class ESP500Device(NETIODevice):
 
         ws_api.send_request(self, ws_type, topic, rule_data)
 
+    def _get_configurable_block(self, ws_topic: str, kind: str, name: str) -> dict[str, Any]:
+        """A rule, PAB or watchdog with its config parsed. The device sends it as a JSON string."""
+        ws_type = "SUBSCRIBE"
+        data = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        if not data:
+            raise ElementNotFound(f"{kind} {name} not found on device {self.host}")
+        data["config"] = json.loads(data["config"])
+        return data
+
+    def _set_configurable_block(
+        self, ws_topic: str, kind: str, name: str, enabled: bool | None, config: dict[str, Any] | None
+    ) -> None:
+        """Changes an existing rule, PAB or watchdog through its config topic. The device refuses another name."""
+        if enabled is not None and not isinstance(enabled, bool):
+            raise InvalidParameterValueError(f"enabled has to be a bool, not {enabled!r}")
+        if config is not None and not isinstance(config, dict):
+            raise InvalidParameterValueError(f"The config has to be a dict, not {config!r}")
+        current = self._get_configurable_block(ws_topic, kind, name)
+        ws_type = "SET"
+        ws_data = {
+            "name": name,
+            "enabled": _value_or_current(enabled, current, "enabled"),
+            "config": json.dumps(_value_or_current(config, current, "config")),
+        }
+        self.logger.debug(f"Setting {kind} {name} on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
     @override
     def create_rule(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         topic = "/rules/create"
@@ -756,14 +783,14 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_rule_by_name(self, rule_name: str) -> dict[str, Any]:
-        self.logger.debug(f"Filtering for rule {rule_name} on device {self.host}")
-        ws_type = "SUBSCRIBE"
         ws_topic = f"rules/name/{rule_name}/config"
-        response = ws_api.send_request(self, ws_type, ws_topic)
-        data = response.get("data")
-        if not data:
-            raise ElementNotFound(f"Rule {rule_name} not found on device {self.host}")
-        return data
+        self.logger.debug(f"Filtering for rule {rule_name} on device {self.host}")
+        return self._get_configurable_block(ws_topic, "Rule", rule_name)
+
+    @override
+    def set_rule(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        ws_topic = f"rules/name/{name}/config"
+        self._set_configurable_block(ws_topic, "rule", name, enabled, config)
 
     @override
     def get_enabled_rules(self) -> list[dict[str, Any]]:
@@ -800,14 +827,14 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_pab_by_name(self, pab_name: str) -> dict[str, Any]:
-        self.logger.debug(f"Filtering for PAB {pab_name} on device {self.host}")
-        ws_type = "SUBSCRIBE"
         ws_topic = f"pab/name/{pab_name}/config"
-        response = ws_api.send_request(self, ws_type, ws_topic)
-        data = response.get("data")
-        if not data:
-            raise ElementNotFound(f"PAB {pab_name} not found on device {self.host}")
-        return data
+        self.logger.debug(f"Filtering for PAB {pab_name} on device {self.host}")
+        return self._get_configurable_block(ws_topic, "PAB", pab_name)
+
+    @override
+    def set_pab(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        ws_topic = f"pab/name/{name}/config"
+        self._set_configurable_block(ws_topic, "PAB", name, enabled, config)
 
     @override
     def get_enabled_pabs(self) -> list[dict[str, Any]]:
@@ -844,14 +871,23 @@ class ESP500Device(NETIODevice):
 
     @override
     def get_watchdog_by_name(self, watchdog_name: str) -> dict[str, Any]:
-        self.logger.debug(f"Filtering for watchdog {watchdog_name} on device {self.host}")
-        ws_type = "SUBSCRIBE"
         ws_topic = f"wdtpingers/name/{watchdog_name}/config"
-        response = ws_api.send_request(self, ws_type, ws_topic)
-        data = response.get("data")
-        if not data:
-            raise ElementNotFound(f"Watchdog {watchdog_name} not found on device {self.host}")
-        return data
+        self.logger.debug(f"Filtering for watchdog {watchdog_name} on device {self.host}")
+        return self._get_configurable_block(ws_topic, "Watchdog", watchdog_name)
+
+    @override
+    def set_watchdog(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        ws_topic = f"wdtpingers/name/{name}/config"
+        self._set_configurable_block(ws_topic, "watchdog", name, enabled, config)
+
+    @override
+    def delete_watchdog_by_name(self, name: str) -> None:
+        topic = "wdtpingers/delete"
+        ws_type = "SET"
+        ws_data = {"name": name}
+        self.get_watchdog_by_name(name)
+        self.logger.debug(f"Attempting to delete watchdog {name} on device {self.host}.")
+        _ = ws_api.send_request(self, ws_type, topic, ws_data)
 
     @override
     def get_enabled_watchdogs(self) -> list[dict[str, Any]]:
@@ -881,6 +917,17 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Attempting to create schedule {name} on device {self.host}.")
         self.logger.debug(f"Schedule configuration: {intervals}")
         ws_api.send_request(self, ws_type, topic, ws_data)
+
+    @override
+    def set_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
+        ws_topic = f"schedules/name/{name}/config"
+        ws_type = "SET"
+        if not isinstance(intervals, list) or not all(isinstance(interval, dict) for interval in intervals):
+            raise InvalidParameterValueError(f"The intervals have to be a list of dicts, not {intervals!r}")
+        ws_data = {"name": name, "intervals": intervals}
+        self.get_schedule_by_name(name)
+        self.logger.debug(f"Setting the intervals of schedule {name} on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def get_schedules(self) -> list[dict[str, Any]]:

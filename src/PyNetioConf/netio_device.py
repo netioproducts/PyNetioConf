@@ -1534,7 +1534,7 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            A JSON object containing the rule information.
+            The rule's "name", "enabled" and "config", the config parsed into a dict.
         """
         pass
 
@@ -1556,6 +1556,30 @@ class NETIODevice(ABC):
         Returns
         -------
 
+        """
+        pass
+
+    @abstractmethod
+    def set_rule(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        """
+        Changes an existing rule: enables or disables it, or replaces its configuration. None keeps the value the
+        device has. A rule can't be renamed.
+
+        Parameters
+        ----------
+        name : str
+            The name of the rule.
+        enabled : bool, optional
+            Whether the rule is enabled.
+        config : dict[str, Any], optional
+            The rule's configuration, as for create_rule().
+
+        Raises
+        ------
+        ElementNotFound
+            There is no rule of that name.
+        InvalidParameterValueError
+            enabled isn't a bool, or config isn't a dict.
         """
         pass
 
@@ -1620,8 +1644,9 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            A JSON object containing the watchdog information.
+            The watchdog's "name", "enabled" and "config", the config parsed into a dict.
         """
+        pass
 
     @abstractmethod
     def get_schedules(self) -> list[dict[str, Any]]:
@@ -1657,6 +1682,42 @@ class NETIODevice(ABC):
         pass
 
     @abstractmethod
+    def set_watchdog(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        """
+        Changes an existing watchdog: enables or disables it, or replaces its configuration. None keeps the value the
+        device has. A watchdog can't be renamed.
+
+        Parameters
+        ----------
+        name : str
+            The name of the watchdog.
+        enabled : bool, optional
+            Whether the watchdog is enabled.
+        config : dict[str, Any], optional
+            The watchdog's configuration, as for create_watchdog().
+
+        Raises
+        ------
+        ElementNotFound
+            There is no watchdog of that name.
+        InvalidParameterValueError
+            enabled isn't a bool, or config isn't a dict.
+        """
+        pass
+
+    @abstractmethod
+    def delete_watchdog_by_name(self, name: str) -> None:
+        """
+        Deletes a watchdog from the device given its name. Raises ElementNotFound if the watchdog isn't found.
+
+        Parameters
+        ----------
+        name : str
+            The name of the watchdog to delete.
+        """
+        pass
+
+    @abstractmethod
     def create_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
         """
         Creates a scedulule on the device given its configuration JSON.
@@ -1672,6 +1733,29 @@ class NETIODevice(ABC):
         -------
 
         """
+
+    @abstractmethod
+    def set_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
+        """
+        Replaces the intervals of an existing schedule. A schedule can't be renamed. The device stores one interval per
+        day, so an interval for several days reads back as one per day.
+
+        Parameters
+        ----------
+        name : str
+            The name of the schedule.
+        intervals : list[dict]
+            The intervals, as for create_schedule(): "from" and "to" in seconds since midnight and the days "mon" to
+            "sun" as booleans.
+
+        Raises
+        ------
+        ElementNotFound
+            There is no schedule of that name.
+        InvalidParameterValueError
+            intervals isn't a list of dicts.
+        """
+        pass
 
     @abstractmethod
     def get_schedule_by_name(self, schedule_name: str) -> dict[str, Any]:
@@ -1846,6 +1930,30 @@ class NETIODevice(ABC):
         Returns
         -------
 
+        """
+        pass
+
+    @abstractmethod
+    def set_pab(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        """
+        Changes an existing PAB: enables or disables it, or replaces its configuration. None keeps the value the
+        device has. A PAB can't be renamed.
+
+        Parameters
+        ----------
+        name : str
+            The name of the PAB.
+        enabled : bool, optional
+            Whether the PAB is enabled.
+        config : dict[str, Any], optional
+            The PAB's configuration, as for create_pab().
+
+        Raises
+        ------
+        ElementNotFound
+            There is no PAB of that name.
+        InvalidParameterValueError
+            enabled isn't a bool, or config isn't a dict.
         """
         pass
 

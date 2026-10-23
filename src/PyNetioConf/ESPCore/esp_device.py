@@ -1064,6 +1064,9 @@ class ESPDevice(NETIODevice):
     def create_rule(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         raise NotImplementedError("create_rule is only available for devices 5.x.x and up, please update your device.")
 
+    def set_rule(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        raise NotImplementedError("set_rule is only available for devices 5.x.x and up, please update your device.")
+
     def delete_rule_by_name(self, name: str) -> None:
         raise NotImplementedError(
             "delete_rule_by_name is only available for devices 5.x.x and up, please update your device."
@@ -1145,6 +1148,9 @@ class ESPDevice(NETIODevice):
             "create_schedule is only available for devices 5.x.x and up, please update your device."
         )
 
+    def set_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
+        raise NotImplementedError("set_schedule is only available for devices 5.x.x and up, please update your device.")
+
     def delete_schedule(self, schedule_id: int) -> None:
         action = "deleteSchedule"
         self.logger.debug(f"Deleting schedule {schedule_id} from device {self.host}")
@@ -1172,6 +1178,14 @@ class ESPDevice(NETIODevice):
     def create_watchdog(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         raise NotImplementedError(
             "create_watchdog is only available for devices 5.x.x and up, please update your device."
+        )
+
+    def set_watchdog(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        raise NotImplementedError("set_watchdog is only available for devices 5.x.x and up, please update your device.")
+
+    def delete_watchdog_by_name(self, name: str) -> None:
+        raise NotImplementedError(
+            "delete_watchdog_by_name is only available for devices 5.x.x and up, please update your device."
         )
 
     def get_pabs(self) -> list[dict[str, Any]]:
@@ -1209,6 +1223,9 @@ class ESPDevice(NETIODevice):
 
     def create_pab(self, enable: bool, name: str, config: dict[str, Any]) -> None:
         raise NotImplementedError("create_pab is only available for devices 5.x.x and up, please update your device.")
+
+    def set_pab(self, name: str, enabled: bool | None = None, config: dict[str, Any] | None = None) -> None:
+        raise NotImplementedError("set_pab is only available for devices 5.x.x and up, please update your device.")
 
     def delete_pab_by_name(self, pab_name: str) -> None:
         action = "deletePAB"
