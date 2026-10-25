@@ -1968,6 +1968,12 @@ class ESP500Device(NETIODevice):
                         seen_not_installed is not None and uptime < perf_counter() - seen_not_installed - 1
                     ) or uptime >= LOAD_DEFAULTS_SETTLE_UPTIME:
                         self.user_permissions = self.get_user_privileges(DEFAULT_USERNAME)
+                        # The device can come back with its old configuration, when the request crashed it
+                        users = self.get_users()
+                        if set(users) != {DEFAULT_USERNAME}:
+                            raise CommunicationError(
+                                f"Device {self.host} came back without the default configuration, its users are {users}"
+                            )
                         self.logger.info(f"Device {self.host} is back with the default configuration")
                         return
                 self.logout()

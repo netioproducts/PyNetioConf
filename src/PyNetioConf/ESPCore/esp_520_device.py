@@ -386,9 +386,18 @@ class ESP520Device(ESP500Device):
         ws_topic = "system/reset"
         ws_data = {"reset": True}
 
+        # The read refreshes a connection that dropped since the last request, which would swallow the reset, and
+        # gives the uptime to check the restart against
+        before = self.get_uptime()
+        requested = perf_counter()
         self.logger.debug(f"Triggering system reset (reboot) on device {self.host}")
-        ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
         sleep(DEVICE_RESET_GRACE_PERIOD)
+        # Reconnects while the device boots. Without a restart the uptime is at least the time since the read, less
+        # 1 s for whole seconds
+        uptime = self.get_uptime()
+        if uptime >= before + perf_counter() - requested - 1:
+            raise CommunicationError(f"Device {self.host} didn't restart after system/reset, its uptime is {uptime} s")
 
     @override
     def _keep_alive(self) -> None:

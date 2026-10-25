@@ -2123,10 +2123,13 @@ class NETIODevice(ABC):
     @abstractmethod
     def system_reset(self) -> None:
         """
-        Triggers an immediate system reset (reboot).
+        Restarts the device and returns once it is reachable again, about 10 s later. A reset sent on a connection the
+        device had already dropped is sent again, and the restart is checked through the uptime.
 
         Raises
         ------
+        CommunicationError
+            The device didn't restart, or didn't come back.
         FeatureNotSupported
             On firmware 5.1.x, which can't be restarted over the WebSocket API. That came with 5.2.0.
         """
@@ -2151,7 +2154,8 @@ class NETIODevice(ABC):
         DeviceError
             The device refused the request for another reason.
         CommunicationError
-            The device didn't come back within LOAD_DEFAULTS_TIMEOUT seconds.
+            The device didn't come back within LOAD_DEFAULTS_TIMEOUT seconds, or came back with its old users, so the
+            defaults weren't loaded.
         AuthError
             The device came back but refused admin with the default password.
         """

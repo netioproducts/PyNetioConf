@@ -91,13 +91,16 @@ def send_request(
     logger.debug(f"Sending request to {device.host} with payload {request}")
     reconnect_deadline: float | None = None
     last_reconnect: float | None = None
+    sent = False
     while True:
         try:
             if device.ws is None:
                 device.login(device.username, device.password)
             if device.ws is None:
                 raise ConnectionError("Couldn't establish a WebSocket connection")
+            sent = False
             device.ws.send(json.dumps(request, ensure_ascii=False))
+            sent = True
             sleep(
                 WS_EXECUTION_DELAY  # TODO: Tie to device/NM
             )  # Due to internal timers it is safer to wait after sending to not overwhelm the device
@@ -188,7 +191,9 @@ def send_request(
                     f"Connection to {device.host} kept dropping for {WS_RECONNECT_TIMEOUT} seconds."
                 )
             last_reconnect = _reconnect(device, reconnect_deadline, last_reconnect)
-            if ws_topic == "system/reset":
+            # A reset that went out ends the connection without a reply. One the drop stopped from going out, on a
+            # connection that was already dead, is sent again like any other request.
+            if ws_topic == "system/reset" and sent:
                 return {}
             continue
         except (AuthError, DeviceError):
