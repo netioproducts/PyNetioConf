@@ -1950,6 +1950,9 @@ class ESP500Device(NETIODevice):
             except CommunicationError as e:
                 went_down = True
                 last_error = e
+            except DeviceError as e:
+                # A device still writing the defaults answers the login's HELO with an error (5.1.3)
+                last_error = e
             except AuthError as e:
                 # Until the restart the device still has the old configuration, where admin can have another password.
                 # These logins are retried on purpose, a refusal only counts once the device has been down.

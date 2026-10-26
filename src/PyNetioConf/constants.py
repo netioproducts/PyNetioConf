@@ -13,7 +13,8 @@ DEVICE_RESET_GRACE_PERIOD = 5
 
 # load_defaults: the device writes the default configuration for about 10 s and restarts. About 10 s after that boot it
 # has a network address, marks itself installed and restarts once more, about 30 s after the request
-LOAD_DEFAULTS_GRACE_PERIOD = 15  # Wait before the first login, so it doesn't reach the device before it restarts
+# Wait before the first login: 5.1.3 writes its default files for 20 s before it restarts
+LOAD_DEFAULTS_GRACE_PERIOD = 25
 LOAD_DEFAULTS_RETRY_INTERVAL = 2  # Time between two login attempts while the device restarts
 LOAD_DEFAULTS_SETTLE_UPTIME = 40  # An installed device up this long has had its restart after installing
 LOAD_DEFAULTS_TIMEOUT = 180  # How long load_defaults waits for the device to come back

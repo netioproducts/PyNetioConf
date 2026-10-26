@@ -25,11 +25,13 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Changed
 
+- The dependencies have minimum versions: `websocket-client` 1.9.2, `requests` 2.34.2 and `urllib3` 2.8.0.
 - `system_reset()` reads the uptime first, so a reset on a connection the device had dropped is no longer lost, waits
   until the device is reachable again, about 10 s instead of 5 s, and raises `CommunicationError` when the device
   didn't restart.
 - `load_defaults()` raises `CommunicationError` when the device comes back with its old users, instead of reporting
-  the defaults as loaded.
+  the defaults as loaded. It waits 25 s instead of 15 s before its first login, and keeps trying when the device
+  answers that login with an error while it is still loading.
 - `get_rule_by_name`, `get_pab_by_name` and `get_watchdog_by_name` return `config` parsed into a dict, the form
   `create_rule`, `create_pab` and `create_watchdog` take. It was the device's JSON string, which breaks code that parsed
   it itself.
