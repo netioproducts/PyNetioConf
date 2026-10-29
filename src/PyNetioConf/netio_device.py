@@ -633,6 +633,9 @@ class NETIODevice(ABC):
         port: int | None = None,
         periodic_restart: bool | None = None,
         restart_period: int | None = None,
+        syslog_enable: bool | None = None,
+        syslog_server: str | None = None,
+        syslog_port: int | None = None,
     ) -> None:
         """
         Sets the system settings on device given the provided parameters. Any argument left as None keeps the
@@ -650,10 +653,29 @@ class NETIODevice(ABC):
         restart_period : int
             The period at which the device will restart. Can be changed regardless of periodic restart being toggled
             on or off.
+        syslog_enable : bool
+            Toggle for sending the device's log to a syslog server. On 5.x firmware a syslog change is stored at once
+            but takes effect only after a restart.
+        syslog_server : str
+            The address of the syslog server.
+        syslog_port : int
+            The UDP port of the syslog server, 1 to 65535.
 
         Returns
         -------
 
+        """
+        pass
+
+    @abstractmethod
+    def get_system_settings(self) -> dict[str, Any]:
+        """
+        Gets the system settings on the device: the device name, the periodic restart and the syslog settings, the
+        ones set_system_settings() changes.
+
+        Returns
+        -------
+            The system settings in the device's own form, on 5.x firmware the fields of system/config.
         """
         pass
 

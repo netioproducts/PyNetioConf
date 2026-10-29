@@ -1702,6 +1702,9 @@ class ESP500Device(NETIODevice):
         port: int | None = None,
         periodic_restart: bool | None = None,
         restart_period: int | None = None,
+        syslog_enable: bool | None = None,
+        syslog_server: str | None = None,
+        syslog_port: int | None = None,
     ) -> None:
         ws_type = "SUBSCRIBE"
         ws_topic = "system/config"
@@ -1713,6 +1716,14 @@ class ESP500Device(NETIODevice):
                 "on 5.0.0+ firmware and was not changed, "
                 "use set_server_settings to change it"
             )
+        if syslog_server is not None and not isinstance(syslog_server, str):
+            raise InvalidParameterValueError(f"The syslog server must be a string, got {syslog_server!r}")
+        if syslog_port is not None and (
+            isinstance(syslog_port, bool) or not isinstance(syslog_port, int) or not 1 <= syslog_port <= 65535
+        ):
+            raise InvalidParameterValueError(
+                f"The syslog port must be a whole number from 1 to 65535, got {syslog_port!r}"
+            )
         cfg_res = ws_api.send_request(self, ws_type, ws_topic)
         cfg_data = self._require_config(cfg_res.get("data", {}), "system")
         if device_name is not None:
@@ -1721,9 +1732,23 @@ class ESP500Device(NETIODevice):
             cfg_data["periodRestartEnable"] = periodic_restart
         if restart_period is not None:
             cfg_data["periodRestartPeriod"] = restart_period
+        if syslog_enable is not None:
+            cfg_data["syslogEnable"] = syslog_enable
+        if syslog_server is not None:
+            cfg_data["syslogServer"] = syslog_server
+        if syslog_port is not None:
+            cfg_data["syslogPort"] = syslog_port
 
         ws_type = "SET"
         _ = ws_api.send_request(self, ws_type, ws_topic, cfg_data)
+
+    @override
+    def get_system_settings(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "system/config"
+        self.logger.debug(f"Fetching system settings on device {self.host}")
+        cfg_res = ws_api.send_request(self, ws_type, ws_topic)
+        return self._require_config(cfg_res.get("data", {}), "system")
 
     @override
     def locate(self) -> None:

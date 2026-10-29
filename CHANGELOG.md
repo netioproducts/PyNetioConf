@@ -22,6 +22,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   an existing rule, PAB or watchdog, `None` keeping what the device has, and `set_schedule(name, intervals)` replaces a
   schedule's intervals, on 5.x firmware. The device doesn't rename any of them.
 - `delete_watchdog_by_name(name)` on 5.x firmware.
+- `get_system_settings()` returns the device name, the periodic restart and the syslog settings. `set_system_settings`
+  takes `syslog_enable`, `syslog_server` and `syslog_port` on 5.x firmware, where a syslog change takes effect only
+  after a restart; firmware older than 5.0.0 raises `NotImplementedError` for them.
 
 ### Changed
 

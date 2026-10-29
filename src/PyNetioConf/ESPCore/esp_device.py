@@ -456,7 +456,12 @@ class ESPDevice(NETIODevice):
         port: int | None = None,
         periodic_restart: bool | None = None,
         restart_period: int | None = None,
+        syslog_enable: bool | None = None,
+        syslog_server: str | None = None,
+        syslog_port: int | None = None,
     ) -> None:
+        if syslog_enable is not None or syslog_server is not None or syslog_port is not None:
+            raise NotImplementedError("Syslog settings are not implemented for firmware older than 5.0.0")
         device_system_info = esp_api.send_request(self, "getSystemInfo")
         info_json_data = device_system_info.json()["data"]
         device_name = device_name if device_name is not None else info_json_data["deviceName"]
@@ -470,6 +475,16 @@ class ESPDevice(NETIODevice):
         }
         self.logger.debug(f"Setting system settings on device {device_name}, host {self.host} to {request_data}")
         esp_api.send_request(self, "setSystemConfig", request_data)
+
+    def get_system_settings(self) -> dict[str, Any]:
+        # The legacy API shows no syslog settings, so only the fields set_system_settings() changes are here.
+        self.logger.debug(f"Fetching system settings on device {self.host}")
+        info_json_data = esp_api.send_request(self, "getSystemInfo").json()["data"]
+        return {
+            "deviceName": info_json_data["deviceName"],
+            "port": info_json_data["port"],
+            "periodicRestart": info_json_data["periodicRestart"],
+        }
 
     def rename_device(self, device_name: str) -> None:
         response = esp_api.send_request(self, "getSystemInfo")
