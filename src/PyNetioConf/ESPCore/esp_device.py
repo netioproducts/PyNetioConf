@@ -1417,6 +1417,37 @@ class ESPDevice(NETIODevice):
         )
 
     @override
+    def get_output_groups(self) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def get_output_group(self, group_id: int) -> dict[str, Any]:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_output_group(
+        self,
+        group_id: int,
+        name: str | None = None,
+        power_up_state: OutputPowerUpState | None = None,
+        reset_delay: int | None = None,
+        outputs: dict[int, int] | None = None,
+    ) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_output_group_id(self, output_id: int, group_id: int) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_output_group_action(self, group_id: int, action: OutputAction) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def switch_output_group(self, group_id: int, state: bool) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:
         raise FeatureNotSupported(
             "get_firmware_updates_list is only available for devices 5.x.x and up, please update your device."

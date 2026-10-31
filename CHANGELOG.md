@@ -7,6 +7,12 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ## [Unreleased]
 
+### Changed
+
+- `import_config()` raises `InvalidParameterValueError` for a file that isn't a JSON object, or isn't a path or a file
+  object, before sending anything. It raised `json.JSONDecodeError`, `TypeError` or `AttributeError`, which breaks code
+  that caught those.
+
 ### Added
 
 - `set_output_power_up_state(output_id, state)` with an `OutputPowerUpState` from `constants` (`ON`, `OFF`, `LAST`), and
@@ -25,6 +31,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `get_system_settings()` returns the device name, the periodic restart and the syslog settings. `set_system_settings`
   takes `syslog_enable`, `syslog_server` and `syslog_port` on 5.x firmware, where a syslog change takes effect only
   after a restart; firmware older than 5.0.0 raises `NotImplementedError` for them.
+- Output groups, on firmware 5.4.0 and newer: `get_output_groups()`, `get_output_group(group_id)`,
+  `set_output_group(group_id, name, power_up_state, reset_delay, outputs)`, `set_output_group_id(output_id, group_id)`,
+  `set_output_group_action(group_id, action)` and `switch_output_group(group_id, state)`, with `OUTPUT_GROUP_COUNT` in
+  `constants`. Experimental until firmware 5.4.0 is released: the first call of each warns with
+  `experimental.ExperimentalWarning`, and the methods may change or go. Older firmware raises `FeatureNotSupported`.
 
 ### Changed
 

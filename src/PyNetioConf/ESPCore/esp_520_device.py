@@ -34,7 +34,7 @@ from .. import NetioManager
 from ..exceptions import CommunicationError, DeviceError, ElementNotFound
 from ..netio_device import NETIODevice
 from . import ws_api
-from .esp_500_device import ESP500Device
+from .esp_500_device import ESP500Device, _load_config_file
 
 
 class ESP520Device(ESP500Device):
@@ -311,10 +311,8 @@ class ESP520Device(ESP500Device):
         if isinstance(file, (str, os.PathLike)):
             with open(file, "rb") as config_file:
                 return self.import_config(config_file, **kwargs)
-        if isinstance(file, io.TextIOBase):
-            file = io.BytesIO(file.read().encode("utf-8"))
-        if not isinstance(file, io.BufferedIOBase):
-            raise TypeError(f"Unsupported file type {type(file).__name__}, expected a path or a file object.")
+        data = _load_config_file(file)
+        file = io.BytesIO(json.dumps(data).encode("utf-8"))
 
         self.logger.debug(f"Importing configuration to host {self.host}")
         if self._ka_thread:

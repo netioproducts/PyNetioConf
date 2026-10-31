@@ -60,6 +60,7 @@ CONFIG_IMPORT_RESTART_TIMEOUT = 90  # How long import_config waits for the devic
 OUTPUT_RESET_DELAY_MIN = 100
 OUTPUT_POWER_UP_INTERVAL_MIN = 0
 OUTPUT_DELAY_MAX = 4294967295
+OUTPUT_GROUP_COUNT = 4  # Firmware 5.4.0+ has the output groups 1 to 4; nothing creates or deletes one
 
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback

@@ -103,6 +103,21 @@ def _choice_value(choices: type[StrEnum], value: str | None, name: str) -> str |
         ) from None
 
 
+def _load_config_file(file: Any) -> dict[str, Any]:
+    """The configuration in a file opened in binary or text mode. Anything but a JSON object is refused."""
+    if not isinstance(file, (io.BufferedIOBase, io.TextIOBase)):
+        raise InvalidParameterValueError(
+            f"The configuration has to be a path or a file opened in binary or text mode, not {type(file).__name__}"
+        )
+    try:
+        data: Any = json.load(file)
+    except ValueError:
+        raise InvalidParameterValueError("The configuration file isn't valid JSON") from None
+    if not isinstance(data, dict):
+        raise InvalidParameterValueError(f"The configuration has to be a JSON object, not {type(data).__name__}")
+    return data
+
+
 def _check_milliseconds(value: int, minimum: int, name: str) -> None:
     """Raises InvalidParameterValueError unless value is a whole number from minimum to OUTPUT_DELAY_MAX."""
     # bool is an int as well, but True as 1 ms is surely a mistake
@@ -1509,13 +1524,13 @@ class ESP500Device(NETIODevice):
         if isinstance(file, (str, os.PathLike)):
             with open(file, "rb") as config_file:
                 return self.import_config(config_file, **kwargs)
+        data = _load_config_file(file)
         if "can_alter_settings" not in self.user_permissions:
             raise PermissionError("You don't have permission to alter settings on this device.")
         if self._ka_thread:
             self._ka_thread.cancel()
             self._ka_thread.join()
         self.logger.debug(f"Importing configuration to device {self.host}")
-        data = json.load(file)
         encoded_data = json.dumps(data).encode("utf-8")
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         requested = perf_counter()
@@ -2188,6 +2203,37 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Fetching outputs overview list on device {self.host}")
         response = ws_api.send_request(self, ws_type, ws_topic)
         return response.get("data", {}).get("items", [])
+
+    @override
+    def get_output_groups(self) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def get_output_group(self, group_id: int) -> dict[str, Any]:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_output_group(
+        self,
+        group_id: int,
+        name: str | None = None,
+        power_up_state: OutputPowerUpState | None = None,
+        reset_delay: int | None = None,
+        outputs: dict[int, int] | None = None,
+    ) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_output_group_id(self, output_id: int, group_id: int) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_output_group_action(self, group_id: int, action: OutputAction) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def switch_output_group(self, group_id: int, state: bool) -> None:
+        raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
 
     @override
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:

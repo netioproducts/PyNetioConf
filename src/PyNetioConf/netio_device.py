@@ -484,6 +484,163 @@ class NETIODevice(ABC):
 
     # endregion
 
+    # region Output Groups
+    # Firmware 5.4.0 and newer. Experimental until 5.4.0 is released: the methods may change or go with it.
+
+    @abstractmethod
+    def get_output_groups(self) -> list[dict[str, Any]]:
+        """
+        Lists the output groups. The device has OUTPUT_GROUP_COUNT groups, 1 to OUTPUT_GROUP_COUNT; nothing creates or
+        deletes one. Experimental: output groups came with firmware 5.4.0, which isn't released yet.
+
+        Returns
+        -------
+        One dict per group: id, name and outputs, a list of {"id": <output id>, "powerUpInterval": <milliseconds>}.
+
+        Raises
+        ------
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def get_output_group(self, group_id: int) -> dict[str, Any]:
+        """
+        Gets an output group's settings. Experimental: output groups came with firmware 5.4.0, which isn't released
+        yet.
+
+        Parameters
+        ----------
+        group_id: int
+            The group, 1 to OUTPUT_GROUP_COUNT.
+
+        Returns
+        -------
+        name, powerUpState (on, off or last), resetDelay (how long the group's short actions last, in milliseconds)
+        and outputs, a list of {"id": <output id>, "powerUpInterval": <milliseconds>}.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The group id is outside 1 to OUTPUT_GROUP_COUNT.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_group(
+        self,
+        group_id: int,
+        name: str | None = None,
+        power_up_state: OutputPowerUpState | None = None,
+        reset_delay: int | None = None,
+        outputs: dict[int, int] | None = None,
+    ) -> None:
+        """
+        Changes an output group's settings. None keeps the value the device has. Experimental: output groups came
+        with firmware 5.4.0, which isn't released yet.
+
+        Parameters
+        ----------
+        group_id: int
+            The group, 1 to OUTPUT_GROUP_COUNT.
+        name: str | None
+            The group's name.
+        power_up_state: OutputPowerUpState | None
+            OutputPowerUpState.ON, OFF or LAST. Separate from the outputs' own power-up states.
+        reset_delay: int | None
+            How long the group's short actions last, in milliseconds, OUTPUT_RESET_DELAY_MIN to OUTPUT_DELAY_MAX.
+            Separate from the outputs' own reset delays.
+        outputs: dict[int, int] | None
+            Outputs to put into the group, each with its power-up interval in milliseconds, 0 to OUTPUT_DELAY_MAX.
+            Each moves in from the group it was in and gets that interval (powerUpInterval in get_output_data()).
+            Outputs left out stay in the group; an output leaves with set_output_group_id(output_id, 0).
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The group id is outside 1 to OUTPUT_GROUP_COUNT, the name isn't a string, the state isn't an
+            OutputPowerUpState, or the reset delay or an interval isn't a whole number in range.
+        InvalidSocketIndex
+            An output id the device doesn't have.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_group_id(self, output_id: int, group_id: int) -> None:
+        """
+        Puts an output into a group, or takes it out of every group with 0 (groupId in get_output_data()). Its
+        power-up interval stays. Experimental: output groups came with firmware 5.4.0, which isn't released yet.
+
+        Parameters
+        ----------
+        output_id: int
+            The number of the output.
+        group_id: int
+            The group, 1 to OUTPUT_GROUP_COUNT, or 0 for no group.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The group id is outside 0 to OUTPUT_GROUP_COUNT.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def set_output_group_action(self, group_id: int, action: OutputAction) -> None:
+        """
+        Switches an output group's outputs. OFF and SHORT_OFF switch them at once; ON and SHORT_ON switch them one
+        after another, each at its power-up interval after the request. The short actions last the group's reset
+        delay from the request, then SHORT_ON switches the outputs off at once and SHORT_OFF on at their intervals
+        again. TOGGLE isn't taken for a group. Experimental: output groups came with firmware 5.4.0, which isn't
+        released yet.
+
+        Parameters
+        ----------
+        group_id: int
+            The group, 1 to OUTPUT_GROUP_COUNT.
+        action: OutputAction
+            OutputAction.ON, OFF, SHORT_ON or SHORT_OFF.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The group id is outside 1 to OUTPUT_GROUP_COUNT, or the action isn't one of those four.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def switch_output_group(self, group_id: int, state: bool) -> None:
+        """
+        Switches an output group on or off: set_output_group_action() with ON or OFF. Experimental: output groups
+        came with firmware 5.4.0, which isn't released yet.
+
+        Parameters
+        ----------
+        group_id: int
+            The group, 1 to OUTPUT_GROUP_COUNT.
+        state: bool
+            True for on, False for off.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The group id is outside 1 to OUTPUT_GROUP_COUNT.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    # endregion
+
     # endregion
 
     # region Device Configuration
