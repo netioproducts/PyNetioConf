@@ -3,6 +3,7 @@ This module contains functions for sending requests to the device's API on EPS b
 """
 
 import io
+import json
 import logging
 from typing import Any
 
@@ -12,6 +13,13 @@ from ..exceptions import CommunicationError
 from ..netio_device import NETIODevice
 
 logger = logging.getLogger(__name__)
+
+JSON_HEADERS = {"Content-Type": "application/json"}
+
+
+def json_body(payload: dict[str, Any]) -> bytes:
+    """A JSON request body in UTF-8. requests' json= writes \\u escapes, which the firmware's parser can't take."""
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
 def check_connectivity(fw_object: NETIODevice, timeout: int = 60) -> float:
@@ -84,7 +92,9 @@ def send_request(
 
     try:
         logger.debug(f"Sending request to {netio_host} with payload {json_payload}")
-        response = session.post(url=netio_host, json=json_payload, timeout=timeout, verify=False)
+        response = session.post(
+            url=netio_host, data=json_body(json_payload), headers=JSON_HEADERS, timeout=timeout, verify=False
+        )
     except requests.exceptions.ConnectionError:
         logger.error(f"Cannot connect to device {fw_object.host}")
         raise CommunicationError("Cannot connect to device")
@@ -96,7 +106,9 @@ def send_request(
             logger.info("Session expired, logging in again")
             fw_object.login(fw_object.username, fw_object.password)
             logger.debug(f"Sending request to {netio_host} with payload {json_payload}")
-            response = session.post(url=netio_host, json=json_payload, timeout=timeout, verify=False)
+            response = session.post(
+                url=netio_host, data=json_body(json_payload), headers=JSON_HEADERS, timeout=timeout, verify=False
+            )
         else:
             raise CommunicationError("Error in response: " + response.json()["errors"][0]["message"])
 

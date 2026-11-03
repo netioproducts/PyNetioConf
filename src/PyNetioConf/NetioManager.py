@@ -10,7 +10,7 @@ import requests
 
 from PyNetioConf.exceptions import CommunicationError
 
-from .ESPCore import esp_device_init
+from .ESPCore import esp_api, esp_device_init
 from .netio_device import NETIODevice
 
 
@@ -147,13 +147,14 @@ class NetioManager:
         json_payload = {"sessionId": "", "action": "getVersion"}
         from urllib3.exceptions import MaxRetryError
 
+        body = esp_api.json_body(json_payload)
         try:
-            response = session.post(f"http://{host}/api", json=json_payload, timeout=300)
+            response = session.post(f"http://{host}/api", data=body, headers=esp_api.JSON_HEADERS, timeout=300)
         except MaxRetryError:
             from time import sleep
 
             sleep(5)
-            response = session.get(f"http://{host}/api", json=json_payload, timeout=300)
+            response = session.get(f"http://{host}/api", data=body, headers=esp_api.JSON_HEADERS, timeout=300)
 
         if "data" not in response.json():
             raise ConnectionError("Invalid response from device")

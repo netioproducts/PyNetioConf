@@ -743,7 +743,7 @@ class ESP500Device(NETIODevice):
         rule_data = {
             "enabled": enable,
             "name": name,
-            "config": json.dumps(config),
+            "config": json.dumps(config, ensure_ascii=False),
         }
 
         ws_api.send_request(self, ws_type, topic, rule_data)
@@ -770,7 +770,7 @@ class ESP500Device(NETIODevice):
         ws_data = {
             "name": name,
             "enabled": _value_or_current(enabled, current, "enabled"),
-            "config": json.dumps(_value_or_current(config, current, "config")),
+            "config": json.dumps(_value_or_current(config, current, "config"), ensure_ascii=False),
         }
         self.logger.debug(f"Setting {kind} {name} on device {self.host}")
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
@@ -785,7 +785,7 @@ class ESP500Device(NETIODevice):
         else:
             raise ElementAlreadyExists(f"Rule {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create rule {name} on device {self.host}.")
-        self.logger.debug(f"Rule configuration: {json.dumps(config)}")
+        self.logger.debug(f"Rule configuration: {json.dumps(config, ensure_ascii=False)}")
         self._create_configurable_block(enable, name, config, topic)
 
     @override
@@ -829,7 +829,7 @@ class ESP500Device(NETIODevice):
         else:
             raise ElementAlreadyExists(f"PAB {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create PAB {name} on device {self.host}.")
-        self.logger.debug(f"PAB configuration: {json.dumps(config)}")
+        self.logger.debug(f"PAB configuration: {json.dumps(config, ensure_ascii=False)}")
         self._create_configurable_block(enable, name, config, topic)
 
     @override
@@ -873,7 +873,7 @@ class ESP500Device(NETIODevice):
         else:
             raise ElementAlreadyExists(f"Watchdog {name} already exists on device {self.host}")
         self.logger.debug(f"Attempting to create watchdog {name} on device {self.host}.")
-        self.logger.debug(f"Watchdog configuration: {json.dumps(config)}")
+        self.logger.debug(f"Watchdog configuration: {json.dumps(config, ensure_ascii=False)}")
         self._create_configurable_block(enable, name, config, topic)
 
     @override
@@ -1359,7 +1359,7 @@ class ESP500Device(NETIODevice):
         }
         self.logger.debug(f"Setting json api state on device {self.host}.")
         logged_data = {key: "***" if "Password" in key else value for key, value in protocol_data.items()}
-        self.logger.debug(f"JSON configuration: {json.dumps(logged_data, indent=4)}")
+        self.logger.debug(f"JSON configuration: {json.dumps(logged_data, ensure_ascii=False, indent=4)}")
         _ = ws_api.send_request(self, ws_type, ws_topic, protocol_data)
 
     @override
@@ -1478,7 +1478,7 @@ class ESP500Device(NETIODevice):
         ws_data = {
             "enable": _value_or_current(state, current, "enable"),
             # The device returns the config JSON-encoded; only encode a given dict.
-            "config": json.dumps(config) if config is not None else current["config"],
+            "config": json.dumps(config, ensure_ascii=False) if config is not None else current["config"],
         }
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
         sleep(1)
@@ -1512,7 +1512,7 @@ class ESP500Device(NETIODevice):
         # 5.1.x sends the configuration as a JSON string
         config: dict[str, Any] = json.loads(ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["config"])
         if save_file:
-            with open(save_file, "w") as file:
+            with open(save_file, "w", encoding="utf-8") as file:
                 json.dump(config, file, ensure_ascii=False, indent=4)
         return config
 
@@ -1531,7 +1531,8 @@ class ESP500Device(NETIODevice):
             self._ka_thread.cancel()
             self._ka_thread.join()
         self.logger.debug(f"Importing configuration to device {self.host}")
-        encoded_data = json.dumps(data).encode("utf-8")
+        # UTF-8, not \u escapes: an escape followed by about 150 characters crashes the device (F52)
+        encoded_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         requested = perf_counter()
         try:

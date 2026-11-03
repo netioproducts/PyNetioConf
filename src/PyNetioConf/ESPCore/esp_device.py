@@ -351,7 +351,7 @@ class ESPDevice(NETIODevice):
             self._ka_thread.cancel()
             self._ka_thread.join()
         data = json.load(file)
-        encoded_data = json.dumps(data).encode("utf-8")
+        encoded_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         esp_api.send_file(self, "/upload/config", encoded_data)
         self.logger.info(
             f"Imported configuration from {getattr(file, 'name', 'in-memory file')}, device {self.host} is "

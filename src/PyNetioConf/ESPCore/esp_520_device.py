@@ -42,6 +42,21 @@ class ESP520Device(ESP500Device):
     A class to control ESP devices with the firmware 5.2.x.
     """
 
+    # The groups export_config() reads, each from export/config/<group>
+    _export_groups: tuple[str, ...] = (
+        "inputs",
+        "network",
+        "outputs",
+        "PAB",
+        "protocols",
+        "rules",
+        "schedules",
+        "system",
+        "users",
+        "wdtpingers",
+        "mqtt",
+    )
+
     def __init__(
         self,
         host: str,
@@ -312,7 +327,8 @@ class ESP520Device(ESP500Device):
             with open(file, "rb") as config_file:
                 return self.import_config(config_file, **kwargs)
         data = _load_config_file(file)
-        file = io.BytesIO(json.dumps(data).encode("utf-8"))
+        # UTF-8, not \u escapes: an escape followed by about 150 characters crashes the device (F52)
+        file = io.BytesIO(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
         self.logger.debug(f"Importing configuration to host {self.host}")
         if self._ka_thread:
@@ -335,35 +351,22 @@ class ESP520Device(ESP500Device):
     @override
     def export_config(self, save_file: str | None = None) -> dict[str, Any]:
         ws_type = "SET"
-        ws_export_topics_list = [
-            "export/config/inputs",
-            "export/config/network",
-            "export/config/outputs",
-            "export/config/PAB",
-            "export/config/protocols",
-            "export/config/rules",
-            "export/config/schedules",
-            "export/config/system",
-            "export/config/users",
-            "export/config/wdtpingers",
-            "export/config/mqtt",
-            "export/config/nbus",
-        ]
         ws_data: dict[str, Any] = {}
 
         config_export: dict[str, Any] = dict()
 
-        for config_group in ws_export_topics_list:
-            self.logger.debug(f"Exporting configuration for {config_group.split('/')[-1]} from device {self.host}")
-            group_data = ws_api.send_request(self, ws_type, config_group, ws_data).get("data", {})
-            config_export |= {config_group.split("/")[-1]: group_data}
+        for config_group in self._export_groups:
+            ws_topic = f"export/config/{config_group}"
+            self.logger.debug(f"Exporting configuration for {config_group} from device {self.host}")
+            group_data = ws_api.send_request(self, ws_type, ws_topic, ws_data).get("data", {})
+            config_export |= {config_group: group_data}
         if save_file is not None:
             file_path = Path(save_file)
             if file_path.exists():
                 self.logger.warning("Export config file exists, overriding.")
                 # TODO: Make override a method parameter
 
-            with open(save_file, "w+") as file:
+            with open(save_file, "w+", encoding="utf-8") as file:
                 conf_string = json.dumps(config_export, ensure_ascii=False, indent=4)
                 file.write(conf_string)
 

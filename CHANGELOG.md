@@ -36,6 +36,7 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `set_output_group_action(group_id, action)` and `switch_output_group(group_id, state)`, with `OUTPUT_GROUP_COUNT` in
   `constants`. Experimental until firmware 5.4.0 is released: the first call of each warns with
   `experimental.ExperimentalWarning`, and the methods may change or go. Older firmware raises `FeatureNotSupported`.
+  `export_config()` includes the groups as `outGroups` on 5.4.0 and newer.
 
 ### Changed
 
@@ -61,6 +62,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `system/reset` and `system/locate` topics, which came with 5.2.0, so the device answered with an error and the methods
   returned as if it had restarted or blinked. This breaks code that calls them on 5.1.x without catching
   `FeatureNotSupported`.
+- `export_config()` asks for the `nbus` group on firmware 5.4.0 and newer only, where NBUS came. On 5.2.x and 5.3.x the
+  export no longer has an empty `nbus`, which breaks code that reads it there.
 
 ### Fixed
 
@@ -78,6 +81,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   the chunk when the device refuses or doesn't answer it. A refused chunk passed silently, and a missing reply raised a
   bare WebSocket error. `update_firmware()` no longer ignores a failed upload.
 - Uploads on 5.2.x and newer pause 0.1 s between chunks instead of 0.3 s.
+- Text outside ASCII is sent as UTF-8 everywhere. The configs of rules, PABs, watchdogs and MQTT-flex, the
+  configuration import on 5.1.x and the JSON API of firmware before 5.0.0 sent it as `\u` escapes, which the firmware
+  cuts off, and which crash it when about 150 more characters follow.
+- `export_config(save_file)` writes the file as UTF-8. Where the system's default encoding is another, it raised
+  `UnicodeEncodeError` for text outside that encoding.
 
 ## [0.3.1] - 2026-10-15
 

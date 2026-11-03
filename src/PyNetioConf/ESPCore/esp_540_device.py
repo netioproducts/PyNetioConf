@@ -45,6 +45,9 @@ class ESP540Device(ESP520Device):
     A class to control ESP devices with the firmware 5.4.x and newer.
     """
 
+    # NBUS and the output groups came with 5.4.0
+    _export_groups: tuple[str, ...] = (*ESP520Device._export_groups, "nbus", "outGroups")
+
     @override
     def __init__(
         self,
