@@ -62,6 +62,12 @@ OUTPUT_POWER_UP_INTERVAL_MIN = 0
 OUTPUT_DELAY_MAX = 4294967295
 OUTPUT_GROUP_COUNT = 4  # Firmware 5.4.0+ has the output groups 1 to 4; nothing creates or deletes one
 
+# NBUS discover, firmware 5.4.0+
+NBUS_DISCOVER_TIMEOUT = 35  # How long discover_nbus_devices waits for the devices found to report, the device 30 s
+NBUS_DISCOVER_SEARCH = 2  # The search itself, before any device found can report; under a second on the line
+NBUS_DISCOVER_INTERVAL = 1  # Time between two reads of nbus/devices while waiting
+NBUS_DISCOVER_SAVE = 1  # Time for the device to save the line once the devices have reported
+
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive
@@ -97,6 +103,13 @@ class TemperatureUnit(StrEnum):
 
     CELSIUS = "C"
     FAHRENHEIT = "F"
+
+
+class NbusRole(StrEnum):
+    """A device's role on its NBUS line, set_nbus_settings(). The master has its clients' outputs and inputs."""
+
+    MASTER = "master"
+    SLAVE = "slave"
 
 
 # The choices of the protocol and network setters. The setters take the plain strings as well, the members are strings.

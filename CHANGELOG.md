@@ -37,6 +37,13 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   `constants`. Experimental until firmware 5.4.0 is released: the first call of each warns with
   `experimental.ExperimentalWarning`, and the methods may change or go. Older firmware raises `FeatureNotSupported`.
   `export_config()` includes the groups as `outGroups` on 5.4.0 and newer.
+- NBUS, on firmware 5.4.0 and newer: `has_nbus()`, `get_nbus_settings()`, `set_nbus_settings(enabled, role)` with an
+  `NbusRole` from `constants`, `discover_nbus_devices(timeout)`, `get_nbus_devices()`, `delete_nbus_device(device_sn)`,
+  `locate_nbus_device(device_sn)`, `set_nbus_device_order(device_sns)` and `get_nbus_mapping()`. Experimental until
+  firmware 5.4.0 is released, like the output groups. Older firmware raises `FeatureNotSupported`, and so does a 5.4.0
+  device without NBUS for the settings and the discover.
+- On an NBUS master, the output methods take the clients' outputs, and `set_outputs_unified()` switches them too; the
+  input methods take the clients' inputs. `output_count` and `input_count` stay the device's own.
 
 ### Changed
 

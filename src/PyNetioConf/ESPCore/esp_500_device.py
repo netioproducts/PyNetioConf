@@ -48,6 +48,7 @@ from ..constants import (
     LOAD_DEFAULTS_RETRY_INTERVAL,
     LOAD_DEFAULTS_SETTLE_UPTIME,
     LOAD_DEFAULTS_TIMEOUT,
+    NBUS_DISCOVER_TIMEOUT,
     ONLINE_UPDATE_ATTEMPTS,
     ONLINE_UPDATE_INTERVAL,
     ONLINE_UPDATE_RETRY_INTERVAL,
@@ -63,6 +64,7 @@ from ..constants import (
     USER_PRIVILEGES,
     WEB_SERVER_RESTART_INTERVAL,
     WEB_SERVER_RESTART_TIMEOUT,
+    NbusRole,
     NetworkMode,
     OutputAction,
     OutputPowerUpState,
@@ -2235,6 +2237,43 @@ class ESP500Device(NETIODevice):
     @override
     def switch_output_group(self, group_id: int, state: bool) -> None:
         raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def has_nbus(self) -> bool:
+        self.logger.debug(f"Checking for NBUS on device {self.host}, its firmware has none")
+        return False
+
+    @override
+    def get_nbus_settings(self) -> dict[str, Any]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_nbus_settings(self, enabled: bool | None = None, role: NbusRole | None = None) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def discover_nbus_devices(self, timeout: float = NBUS_DISCOVER_TIMEOUT) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def get_nbus_devices(self) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def delete_nbus_device(self, device_sn: str) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def locate_nbus_device(self, device_sn: str) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_nbus_device_order(self, device_sns: list[str]) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def get_nbus_mapping(self) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
 
     @override
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:

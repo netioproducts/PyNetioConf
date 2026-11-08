@@ -15,6 +15,7 @@ else:
 
 import logging
 import threading
+from time import perf_counter, sleep
 
 from websocket import WebSocket
 
@@ -22,9 +23,14 @@ from .. import NetioManager
 from ..constants import (
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_REQUEST_QUEUE_LEN,
+    NBUS_DISCOVER_INTERVAL,
+    NBUS_DISCOVER_SAVE,
+    NBUS_DISCOVER_SEARCH,
+    NBUS_DISCOVER_TIMEOUT,
     OUTPUT_GROUP_COUNT,
     OUTPUT_POWER_UP_INTERVAL_MIN,
     OUTPUT_RESET_DELAY_MIN,
+    NbusRole,
     OutputAction,
     OutputPowerUpState,
 )
@@ -32,7 +38,10 @@ from ..exceptions import (
     CommunicationError,
     DeviceError,
     ElementNotFound,
+    FeatureNotSupported,
     InvalidParameterValueError,
+    InvalidSocketIndex,
+    ProtocolNotEnabled,
 )
 from ..experimental import experimental
 from . import ws_api
@@ -193,6 +202,49 @@ class ESP540Device(ESP520Device):
         return [(int(item["id"]), item["state"] == "on") for item in items]
 
     @override
+    def _check_socket_index(self, socket_index: int) -> None:
+        # output_count is the device's own outputs; an NBUS master lists its clients' outputs after them
+        if socket_index > self.output_count:
+            outputs = [int(item["id"]) for item in self.get_outputs_list()]
+            if socket_index not in outputs:
+                raise InvalidSocketIndex(
+                    f"You tried to access output {socket_index}, the device {self.host} has the outputs {outputs}."
+                )
+            return
+        super()._check_socket_index(socket_index)
+
+    @override
+    def set_outputs_unified(self, state: bool) -> None:
+        self.logger.debug(f"Setting all outputs unified to {state} on device {self.host}")
+        for output in [int(item["id"]) for item in self.get_outputs_list()]:
+            self.set_output(output, state)
+
+    @override
+    def get_input_data(self, input_id: int) -> dict[str, Any]:
+        self.logger.debug(f"Fetching input {input_id} data from device {self.host}")
+        # Looked up by id: an NBUS master lists its clients' inputs after its own
+        items: list[dict[str, Any]] = self.get_input_list()["items"]
+        for item in items:
+            if int(item["id"]) == input_id:
+                return item
+        raise InvalidSocketIndex(
+            f"You tried to access input {input_id}, the device {self.host} has the inputs "
+            f"{[int(item['id']) for item in items]}."
+        )
+
+    @override
+    def _check_input_index(self, input_id: int) -> None:
+        # input_count is the device's own inputs; an NBUS master lists its clients' inputs after them
+        if input_id > self.input_count:
+            inputs = [int(item["id"]) for item in self.get_input_list()["items"]]
+            if input_id not in inputs:
+                raise InvalidSocketIndex(
+                    f"You tried to access input {input_id}, the device {self.host} has the inputs {inputs}."
+                )
+            return
+        super()._check_input_index(input_id)
+
+    @override
     def _set_output_config(
         self,
         output_id: int,
@@ -322,3 +374,156 @@ class ESP540Device(ESP520Device):
     def switch_output_group(self, group_id: int, state: bool) -> None:
         self.logger.debug(f"Switching output group {group_id} {'on' if state else 'off'} on device {self.host}")
         self.set_output_group_action(group_id, OutputAction.ON if state else OutputAction.OFF)
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def has_nbus(self) -> bool:
+        self.logger.debug(f"Checking for NBUS on device {self.host}")
+        try:
+            self.get_nbus_settings()
+        except FeatureNotSupported:
+            return False
+        return True
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def get_nbus_settings(self) -> dict[str, Any]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "nbus/config"
+
+        self.logger.debug(f"Fetching the NBUS settings on device {self.host}")
+        settings: dict[str, Any] = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        if not settings:
+            # Only a device with an NBUS configuration has NBUS, the others read {} and ignore a SET
+            raise FeatureNotSupported(f"Device {self.host} has no NBUS.")
+        return settings
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def set_nbus_settings(self, enabled: bool | None = None, role: NbusRole | None = None) -> None:
+        if enabled is not None and not isinstance(enabled, bool):
+            raise InvalidParameterValueError(f"enabled has to be True or False, not {enabled!r}")
+        # The firmware takes any role, and acts as a slave on all but master
+        nbus_role = _choice_value(NbusRole, role, "NBUS role")
+        ws_type = "SET"
+        ws_topic = "nbus/config"
+
+        self.logger.debug(f"Setting the NBUS settings on device {self.host}")
+        current = self.get_nbus_settings()
+        # enabled restarts the NBUS task, which applies the role; maxOutputCount is required and goes back as read
+        ws_data = {
+            "enabled": _value_or_current(enabled, current, "enabled"),
+            "nbusRole": _value_or_current(nbus_role, current, "nbusRole"),
+            "maxOutputCount": current["maxOutputCount"],
+        }
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def discover_nbus_devices(self, timeout: float = NBUS_DISCOVER_TIMEOUT) -> list[dict[str, Any]]:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout < 0:
+            raise InvalidParameterValueError(f"The timeout has to be a number of seconds, not {timeout!r}")
+        settings = self.get_nbus_settings()
+        if not settings["enabled"] or settings["nbusRole"] != NbusRole.MASTER:
+            raise ProtocolNotEnabled(
+                f"NBUS isn't enabled as master on device {self.host} ({settings['nbusRole']}, enabled "
+                f"{settings['enabled']}), only an enabled master discovers"
+            )
+        ws_type = "SET"
+        ws_topic = "nbus/discover"
+
+        self.logger.debug(f"Discovering the NBUS devices on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic)
+        # The reply comes at once and nothing marks the end of the search. The devices found get their outputs when
+        # they report, and the device saves the line once every Online one has
+        start = perf_counter()
+        sleep(min(NBUS_DISCOVER_SEARCH, timeout))
+        while True:
+            devices = self.get_nbus_devices()
+            waiting = [
+                device["deviceSN"]
+                for device in devices
+                # A device listed after a boot with NBUS disabled has no outputs field (F27)
+                if device["status"] == "Online" and not ("outputs" in device and device["outputs"])
+            ]
+            if not waiting:
+                sleep(NBUS_DISCOVER_SAVE)
+                return self.get_nbus_devices()
+            if perf_counter() - start >= timeout:
+                self.logger.warning(
+                    f"The NBUS devices {waiting} found by device {self.host} didn't report their outputs within "
+                    f"{timeout} s"
+                )
+                return devices
+            sleep(NBUS_DISCOVER_INTERVAL)
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def get_nbus_devices(self) -> list[dict[str, Any]]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "nbus/devices"
+
+        self.logger.debug(f"Fetching the NBUS devices on device {self.host}")
+        data: dict[str, Any] = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        # A device without NBUS answers {}
+        return data["items"] if data else []
+
+    def _nbus_device_sn(self, device_sn: str, listed: list[str]) -> str:
+        """The device's MAC as the master lists it, 12 lower-case hex digits; the firmware answers OK to others."""
+        if not isinstance(device_sn, str):
+            raise InvalidParameterValueError(f"The NBUS device has to be given by its deviceSN, not {device_sn!r}")
+        normalized = device_sn.replace(":", "").replace("-", "").lower()
+        if normalized not in listed:
+            raise ElementNotFound(f"Device {self.host} doesn't list the NBUS device {device_sn}, only {listed}")
+        return normalized
+
+    def _listed_nbus_devices(self) -> list[str]:
+        return [str(device["deviceSN"]) for device in self.get_nbus_devices()]
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def delete_nbus_device(self, device_sn: str) -> None:
+        ws_type = "SET"
+        ws_topic = "nbus/devices/delete"
+        ws_data = {"deviceSN": self._nbus_device_sn(device_sn, self._listed_nbus_devices())}
+
+        self.logger.debug(f"Deleting the NBUS device {device_sn} on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def locate_nbus_device(self, device_sn: str) -> None:
+        ws_type = "SET"
+        ws_topic = "nbus/devices/locate"
+        ws_data = {"deviceSN": self._nbus_device_sn(device_sn, self._listed_nbus_devices())}
+
+        self.logger.debug(f"Locating the NBUS device {device_sn} on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def set_nbus_device_order(self, device_sns: list[str]) -> None:
+        if not isinstance(device_sns, list):
+            raise InvalidParameterValueError(f"The order has to be a list of deviceSNs, not {device_sns!r}")
+        listed = self._listed_nbus_devices()
+        order = [self._nbus_device_sn(device_sn, listed) for device_sn in device_sns]
+        if sorted(order) != sorted(listed):
+            raise InvalidParameterValueError(f"The order has to name each NBUS device once, {listed}, not {device_sns}")
+        ws_type = "SET"
+        ws_topic = "nbus/devices/order"
+        # Every device with its 0-based place, as the web interface sends it
+        ws_data = {"items": [{"deviceSN": device_sn, "order": place} for place, device_sn in enumerate(order)]}
+
+        self.logger.debug(f"Setting the NBUS device order to {order} on device {self.host}")
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+
+    @override
+    @experimental("NBUS", "5.4.0")
+    def get_nbus_mapping(self) -> list[dict[str, Any]]:
+        ws_type = "SUBSCRIBE"
+        ws_topic = "nbus/mapping"
+
+        self.logger.debug(f"Fetching the NBUS output mapping on device {self.host}")
+        data: dict[str, Any] = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        # A device without NBUS answers {}
+        return data["outputs"] if data else []

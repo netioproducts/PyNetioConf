@@ -22,6 +22,8 @@ from xml.etree import ElementTree as ET
 import requests
 
 from ..constants import (
+    NBUS_DISCOVER_TIMEOUT,
+    NbusRole,
     NetworkMode,
     OutputAction,
     OutputPowerUpState,
@@ -1446,6 +1448,43 @@ class ESPDevice(NETIODevice):
     @override
     def switch_output_group(self, group_id: int, state: bool) -> None:
         raise FeatureNotSupported("Output groups are only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def has_nbus(self) -> bool:
+        self.logger.debug(f"Checking for NBUS on device {self.host}, its firmware has none")
+        return False
+
+    @override
+    def get_nbus_settings(self) -> dict[str, Any]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_nbus_settings(self, enabled: bool | None = None, role: NbusRole | None = None) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def discover_nbus_devices(self, timeout: float = NBUS_DISCOVER_TIMEOUT) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def get_nbus_devices(self) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def delete_nbus_device(self, device_sn: str) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def locate_nbus_device(self, device_sn: str) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def set_nbus_device_order(self, device_sns: list[str]) -> None:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
+
+    @override
+    def get_nbus_mapping(self) -> list[dict[str, Any]]:
+        raise FeatureNotSupported("NBUS is only supported on firmware 5.4.0 and newer.")
 
     @override
     def get_firmware_updates_list(self) -> list[dict[str, Any]]:

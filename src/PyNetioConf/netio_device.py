@@ -15,6 +15,8 @@ from xml.etree.ElementTree import Element
 from websocket import WebSocket
 
 from .constants import (
+    NBUS_DISCOVER_TIMEOUT,
+    NbusRole,
     NetworkMode,
     OutputAction,
     OutputPowerUpState,
@@ -205,7 +207,7 @@ class NETIODevice(ABC):
     @abstractmethod
     def set_outputs_unified(self, state: bool) -> None:
         """
-        Set all outputs to the same state.
+        Set all outputs to the same state, on an NBUS master its clients' outputs too.
 
         Parameters
         ----------
@@ -643,6 +645,202 @@ class NETIODevice(ABC):
 
     # endregion
 
+    # region NBUS
+    # Firmware 5.4.0 and newer, on devices made with NBUS. Experimental until 5.4.0 is released: the methods may change
+    # or go with it. A master lists its clients' outputs and inputs after its own, and the output and input methods
+    # take their ids; output_count and input_count stay the device's own.
+
+    @abstractmethod
+    def has_nbus(self) -> bool:
+        """
+        Whether the device has NBUS: firmware 5.4.0 or newer, and a device made with it. Experimental: NBUS came with
+        firmware 5.4.0, which isn't released yet.
+        """
+        pass
+
+    @abstractmethod
+    def get_nbus_settings(self) -> dict[str, Any]:
+        """
+        Gets the NBUS settings. Experimental: NBUS came with firmware 5.4.0, which isn't released yet.
+
+        Returns
+        -------
+        enabled, nbusRole (master or slave) and maxOutputCount, which the device sets to 48 at every boot.
+
+        Raises
+        ------
+        FeatureNotSupported
+            The firmware is older than 5.4.0, or the device has no NBUS.
+        """
+        pass
+
+    @abstractmethod
+    def set_nbus_settings(self, enabled: bool | None = None, role: NbusRole | None = None) -> None:
+        """
+        Enables or disables NBUS and sets the device's role on the line. None keeps the value the device has. Every
+        call restarts the device's NBUS, which applies the role, and saves the settings, without restarting the device.
+        Enabled, the line runs at full speed; disabled, the device only listens for an installation, and a master
+        drops the requests to its clients' outputs until it restarts. Experimental: NBUS came with firmware 5.4.0,
+        which isn't released yet.
+
+        Parameters
+        ----------
+        enabled: bool | None
+            True to enable NBUS.
+        role: NbusRole | None
+            NbusRole.MASTER or SLAVE. A discover makes the devices it finds slaves itself.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            enabled isn't a bool, or the role isn't an NbusRole.
+        FeatureNotSupported
+            The firmware is older than 5.4.0, or the device has no NBUS.
+        """
+        pass
+
+    @abstractmethod
+    def discover_nbus_devices(self, timeout: float = NBUS_DISCOVER_TIMEOUT) -> list[dict[str, Any]]:
+        """
+        Searches the line for devices, adds the new ones to the device list with their outputs and inputs, and waits
+        until they have reported them. Every device found saves itself as an enabled slave of this master, so don't
+        discover on a line with devices that aren't to be its clients. A master searches at full speed and finds only
+        devices with NBUS enabled: set a line up by enabling each client as a slave, then this device as a master, and
+        discover a few seconds later; one sent right after enabling found nothing. A listed device that doesn't answer
+        stays listed as Offline without its outputs and inputs; the
+        first new device takes its place and its output ids. Requests to the clients' outputs are dropped while the
+        search runs. Experimental: NBUS came with firmware 5.4.0, which isn't released yet.
+
+        Parameters
+        ----------
+        timeout: float
+            Seconds to wait for the devices found to report their outputs. The device saves the line when they have,
+            or after 30 s. A device still without outputs then is logged as a warning.
+
+        Returns
+        -------
+        The device list, as get_nbus_devices() gives it.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The timeout isn't a number of seconds.
+        ProtocolNotEnabled
+            NBUS isn't enabled on the device as master. A discover from a slave would take the line over.
+        FeatureNotSupported
+            The firmware is older than 5.4.0, or the device has no NBUS.
+        """
+        pass
+
+    @abstractmethod
+    def get_nbus_devices(self) -> list[dict[str, Any]]:
+        """
+        Lists the master's clients in line order, without the master. Experimental: NBUS came with firmware 5.4.0,
+        which isn't released yet.
+
+        Returns
+        -------
+        One dict per client: deviceSN (its MAC, 12 lower-case hex digits), deviceName, brandModel, nbusRole, fwVersion,
+        status (Online or Offline), outputFrom and outputTo (the master's ids of its outputs, 0 without outputs), and
+        outputs, a list of {"id": <the client's own output number>, "name": <the master's name for it>}. Until a
+        client has reported, deviceName reads "name" and fwVersion "fwVersion". A slave, or a device without NBUS,
+        lists nothing.
+
+        Raises
+        ------
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def delete_nbus_device(self, device_sn: str) -> None:
+        """
+        Removes a client from the master's list, with its outputs and inputs, and moves the outputs of the clients
+        behind it up. The client isn't told and stays a slave, so a later discover adds it back. Experimental: NBUS
+        came with firmware 5.4.0, which isn't released yet.
+
+        Parameters
+        ----------
+        device_sn: str
+            The client's deviceSN, its MAC, with or without separators.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            device_sn isn't a string.
+        ElementNotFound
+            The master doesn't list the device.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def locate_nbus_device(self, device_sn: str) -> None:
+        """
+        Makes a client's LED blink for 60 seconds. Experimental: NBUS came with firmware 5.4.0, which isn't released
+        yet.
+
+        Parameters
+        ----------
+        device_sn: str
+            The client's deviceSN, its MAC, with or without separators.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            device_sn isn't a string.
+        ElementNotFound
+            The master doesn't list the device.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def set_nbus_device_order(self, device_sns: list[str]) -> None:
+        """
+        Puts the clients in a new order. Their outputs move with them and get new ids, keeping their names, groups,
+        schedules and delays; rules, PABs, watchdogs and the inputs don't follow. Experimental: NBUS came with firmware
+        5.4.0, which isn't released yet.
+
+        Parameters
+        ----------
+        device_sns: list[str]
+            Every client's deviceSN once, in the new order.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            device_sns isn't a list of strings naming every client once.
+        ElementNotFound
+            The master doesn't list one of the devices.
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    @abstractmethod
+    def get_nbus_mapping(self) -> list[dict[str, Any]]:
+        """
+        Maps the master's outputs to its clients'. Experimental: NBUS came with firmware 5.4.0, which isn't released
+        yet.
+
+        Returns
+        -------
+        One dict per output of the master: id, and slaveId, deviceName and deviceSN of the client it belongs to, which
+        are 0, None and None for the master's own outputs. Empty on a device without NBUS.
+
+        Raises
+        ------
+        FeatureNotSupported
+            The firmware is older than 5.4.0.
+        """
+        pass
+
+    # endregion
+
     # region Device Configuration
 
     # region Network
@@ -861,7 +1059,8 @@ class NETIODevice(ABC):
     @abstractmethod
     def reset_power_consumption_counters(self) -> None:
         """
-        Resets the power consumption counters on the device for all metered outputs.
+        Resets the power consumption counters on the device for all metered outputs. An NBUS master's clients' outputs
+        are left out: the firmware can't reset their counters from the master.
 
         Returns
         -------
