@@ -54,6 +54,7 @@ def send_request(
     ws_type: str,
     ws_topic: str | None = None,
     ws_data: dict[str, Any] | None = None,
+    resend: bool = True,
 ) -> dict[str, Any]:
     """
     Send a request to the device's websocket API and return the response.
@@ -67,6 +68,9 @@ def send_request(
         The target of the request if applicable.
     data : Dict
         The data to send with the request if applicable.
+    resend : bool
+        Whether a request that went out is sent again after the connection dropped. False for a request that may
+        itself have restarted the device, which then raises CommunicationError once the device is back.
 
     Returns
     -------
@@ -195,6 +199,11 @@ def send_request(
             # connection that was already dead, is sent again like any other request.
             if ws_topic == "system/reset" and sent:
                 return {}
+            if sent and not resend:
+                raise CommunicationError(
+                    f"The connection to {device.host} dropped after the {ws_type} of {ws_topic} was sent, so the "
+                    "device probably restarted on it. The request wasn't sent again."
+                )
             continue
         except (AuthError, DeviceError):
             # A refused login from reconnecting, or a request the device refused, is not a communication problem

@@ -62,6 +62,17 @@ OUTPUT_POWER_UP_INTERVAL_MIN = 0
 OUTPUT_DELAY_MAX = 4294967295
 OUTPUT_GROUP_COUNT = 4  # Firmware 5.4.0+ has the output groups 1 to 4; nothing creates or deletes one
 
+# MQTT config, what the firmware takes (5.x)
+MQTT_BROKER_REQUIRED = ("url", "port", "type", "username", "password", "protocol")
+MQTT_PROTOCOLS = ("mqtt", "mqtts")
+MQTT_CLIENT_ID_MAX = 31  # Characters, before the variables in it are expanded
+MQTT_CONFIG_MAX = 8192  # Bytes of the config as JSON, the limit of protocols/mqtt/config
+MQTT_EVENT_TYPES = ("timer", "change", "delta")
+MQTT_TIMER_PERIOD_MIN = 5  # Seconds
+MQTT_APPLY_TIMEOUT = 5  # How long set_mqttflex_state waits for the device to apply an enabled config
+MQTT_APPLY_INTERVAL = 0.5  # Time between two reads of protocols/info while waiting
+MQTT_LOG_TYPES = ("MQTT", "Variable parser")  # The log entries that say why a config wasn't applied
+
 # NBUS discover, firmware 5.4.0+
 NBUS_DISCOVER_TIMEOUT = 35  # How long discover_nbus_devices waits for the devices found to report, the device 30 s
 NBUS_DISCOVER_SEARCH = 2  # The search itself, before any device found can report; under a second on the line

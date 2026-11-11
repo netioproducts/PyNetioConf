@@ -12,6 +12,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `import_config()` raises `InvalidParameterValueError` for a file that isn't a JSON object, or isn't a path or a file
   object, before sending anything. It raised `json.JSONDecodeError`, `TypeError` or `AttributeError`, which breaks code
   that caught those.
+- `get_mqttflex_state()` returns `config` as a dict instead of a JSON string, on 5.x firmware. This breaks code that
+  parsed the string.
+- `set_mqttflex_state()` raises `InvalidParameterValueError` before sending a config the firmware doesn't apply or
+  crashes on, and `DeviceError` with the code `ConfigNotApplied` when the device doesn't store the config or stores it
+  and doesn't apply it, on 5.x firmware. It sent any config and returned.
 
 ### Added
 

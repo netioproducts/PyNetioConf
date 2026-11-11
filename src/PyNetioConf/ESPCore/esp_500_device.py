@@ -48,6 +48,15 @@ from ..constants import (
     LOAD_DEFAULTS_RETRY_INTERVAL,
     LOAD_DEFAULTS_SETTLE_UPTIME,
     LOAD_DEFAULTS_TIMEOUT,
+    MQTT_APPLY_INTERVAL,
+    MQTT_APPLY_TIMEOUT,
+    MQTT_BROKER_REQUIRED,
+    MQTT_CLIENT_ID_MAX,
+    MQTT_CONFIG_MAX,
+    MQTT_EVENT_TYPES,
+    MQTT_LOG_TYPES,
+    MQTT_PROTOCOLS,
+    MQTT_TIMER_PERIOD_MIN,
     NBUS_DISCOVER_TIMEOUT,
     ONLINE_UPDATE_ATTEMPTS,
     ONLINE_UPDATE_INTERVAL,
@@ -83,6 +92,7 @@ from ..exceptions import (
     FeatureNotSupported,
     InvalidParameterValueError,
     InvalidSocketIndex,
+    UnauthorizedError,
 )
 from ..netio_device import NETIODevice
 from . import esp_api, ws_api
@@ -128,6 +138,170 @@ def _check_milliseconds(value: int, minimum: int, name: str) -> None:
             f"The {name} is in milliseconds and has to be a whole number from {minimum} to {OUTPUT_DELAY_MAX}, "
             f"not {value!r}"
         )
+
+
+def _mqtt_number(value: Any) -> float | None:
+    """value as a number when it is one or a string of one, as the firmware takes both. None otherwise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _mqtt_entries(parent: dict[str, Any], key: str, where: str) -> list[dict[str, Any]]:
+    """The objects of the list under key, none when the key is missing. The firmware skips other entries silently."""
+    if key not in parent:
+        return []
+    entries: Any = parent[key]
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise InvalidParameterValueError(f"MQTT config, {where}: {key!r} has to be a list of objects")
+    return entries
+
+
+def _mqtt_text(parent: dict[str, Any], key: str, where: str) -> None:
+    """Raises InvalidParameterValueError unless parent has a non-empty string under key."""
+    if key not in parent or not isinstance(parent[key], str) or not parent[key]:
+        raise InvalidParameterValueError(f"MQTT config, {where}: {key!r} has to be a non-empty string")
+
+
+def _check_mqtt_qos(entry: dict[str, Any], where: str) -> None:
+    if "qos" in entry and _mqtt_number(entry["qos"]) not in (0, 1, 2):
+        raise InvalidParameterValueError(f"MQTT config, {where}: 'qos' has to be 0, 1 or 2, not {entry['qos']!r}")
+
+
+def _check_mqtt_events(entry: dict[str, Any], where: str) -> None:
+    for number, event in enumerate(_mqtt_entries(entry, "events", where), 1):
+        at = f"{where}, event {number}"
+        # Without a type the firmware crashes
+        if "type" not in event or event["type"] not in MQTT_EVENT_TYPES:
+            raise InvalidParameterValueError(f"MQTT config, {at}: 'type' has to be one of {MQTT_EVENT_TYPES}")
+        if event["type"] == "timer":
+            period = _mqtt_number(event["period"]) if "period" in event else None
+            if period is None or period < MQTT_TIMER_PERIOD_MIN:
+                raise InvalidParameterValueError(
+                    f"MQTT config, {at}: a timer needs a 'period' of at least {MQTT_TIMER_PERIOD_MIN} seconds"
+                )
+            continue
+        _mqtt_text(event, "source", at)
+        if event["type"] == "delta" and ("delta" not in event or _mqtt_number(event["delta"]) is None):
+            raise InvalidParameterValueError(f"MQTT config, {at}: a delta event needs a number as 'delta'")
+
+
+def _check_mqtt_broker(broker: Any) -> None:
+    where = "broker"
+    if not isinstance(broker, dict):
+        raise InvalidParameterValueError("MQTT config: 'broker' has to be an object")
+    missing = [key for key in MQTT_BROKER_REQUIRED if key not in broker]
+    if missing:
+        raise InvalidParameterValueError(f"MQTT config, {where}: {missing} missing")
+    _mqtt_text(broker, "url", where)
+    if "://" in broker["url"]:
+        raise InvalidParameterValueError(f"MQTT config, {where}: 'url' is the host alone, without a scheme")
+    for key in ("ssl", "clientcert"):
+        if key in broker and not isinstance(broker[key], bool):
+            raise InvalidParameterValueError(f"MQTT config, {where}: {key!r} has to be true or false")
+    if broker["protocol"] not in MQTT_PROTOCOLS:
+        raise InvalidParameterValueError(f"MQTT config, {where}: 'protocol' has to be one of {MQTT_PROTOCOLS}")
+    # The firmware adds an "s" for ssl, and "mqttss" connects nowhere
+    if broker["protocol"] == "mqtts" and "ssl" in broker and broker["ssl"]:
+        raise InvalidParameterValueError(f"MQTT config, {where}: use the protocol 'mqtts' or 'ssl' true, not both")
+    if "clientid" in broker and (
+        not isinstance(broker["clientid"], str) or len(broker["clientid"]) > MQTT_CLIENT_ID_MAX
+    ):
+        raise InvalidParameterValueError(
+            f"MQTT config, {where}: 'clientid' has to be a string of at most {MQTT_CLIENT_ID_MAX} characters"
+        )
+
+
+def _mqtt_config_text(config: Any) -> str:
+    """
+    The MQTT config as the JSON string to send, without spaces, as the device stores it. Raises
+    InvalidParameterValueError for a config the checks refuse or that is longer than the topic takes.
+    """
+    _check_mqtt_config(config)
+    text = json.dumps(config, ensure_ascii=False, separators=(",", ":"))
+    size = len(text.encode())
+    if size > MQTT_CONFIG_MAX:
+        raise InvalidParameterValueError(f"The MQTT config is {size} bytes long, the device takes {MQTT_CONFIG_MAX}")
+    return text
+
+
+def _mqtt_difference(sent: Any, held: Any, where: str) -> str | None:
+    """
+    Where the MQTT config the device holds differs from the one sent, or None when they are the same. A string of
+    digits that the device returns as that number counts as the same: the firmware stores it so.
+    """
+    if isinstance(sent, dict) and isinstance(held, dict):
+        for key in sent.keys() | held.keys():
+            if key not in sent or key not in held:
+                return f"{where}.{key} is {'missing' if key in sent else 'added'}"
+            difference = _mqtt_difference(sent[key], held[key], f"{where}.{key}")
+            if difference is not None:
+                return difference
+        return None
+    if isinstance(sent, list) and isinstance(held, list):
+        if len(sent) != len(held):
+            return f"{where} has {len(held)} entries, not {len(sent)}"
+        for index, (sent_item, held_item) in enumerate(zip(sent, held)):
+            difference = _mqtt_difference(sent_item, held_item, f"{where}[{index}]")
+            if difference is not None:
+                return difference
+        return None
+    if isinstance(sent, bool) or isinstance(held, bool):
+        same = sent is held
+    elif isinstance(sent, str) and isinstance(held, (int, float)):
+        same = sent == str(held)
+    else:
+        same = sent == held
+    # Without the values: the config holds the broker's password
+    return None if same else f"{where} isn't the value that was sent"
+
+
+def _check_mqtt_config(config: Any) -> None:
+    """
+    Raises InvalidParameterValueError for an MQTT config that crashes the firmware or that it doesn't apply. The device
+    answers OK to any config, so nothing else would tell. Variable names and unknown keys aren't checked.
+    """
+    if not isinstance(config, dict) or "broker" not in config:
+        raise InvalidParameterValueError("The MQTT config has to be an object with a 'broker'")
+    _check_mqtt_broker(config["broker"])
+    for number, entry in enumerate(_mqtt_entries(config, "publish", "config"), 1):
+        where = f"publish entry {number}"
+        _mqtt_text(entry, "topic", where)
+        if "payload" not in entry and "payloaddef" not in entry:
+            raise InvalidParameterValueError(f"MQTT config, {where}: 'payload' or 'payloaddef' is needed")
+        if "payloaddef" in entry:
+            definition: Any = entry["payloaddef"]
+            if not isinstance(definition, dict) or "source" not in definition or "translate" not in definition:
+                raise InvalidParameterValueError(
+                    f"MQTT config, {where}: 'payloaddef' has to be an object with 'source' and 'translate'"
+                )
+        _check_mqtt_qos(entry, where)
+        _check_mqtt_events(entry, where)
+    for number, entry in enumerate(_mqtt_entries(config, "subscribe", "config"), 1):
+        where = f"subscribe entry {number}"
+        _mqtt_text(entry, "topic", where)
+        _mqtt_text(entry, "target", where)
+        # Without an action the firmware crashes when the entry is removed. A number is what the ACTION targets take,
+        # and what the device returns for a string of digits
+        if (
+            "action" not in entry
+            or isinstance(entry["action"], bool)
+            or not isinstance(entry["action"], (str, int, float))
+        ):
+            raise InvalidParameterValueError(
+                f"MQTT config, {where}: 'action' has to be a string or a number, '${{payload}}' to pass the message on"
+            )
+        for mapping in _mqtt_entries(entry, "actiondef", where):
+            if "payload" not in mapping or "action" not in mapping:
+                raise InvalidParameterValueError(
+                    f"MQTT config, {where}: every 'actiondef' entry needs 'payload' and 'action'"
+                )
+        _check_mqtt_qos(entry, where)
+    for number, entry in enumerate(_mqtt_entries(config, "groupEvents", "config"), 1):
+        _check_mqtt_events(entry, f"group event {number}")
 
 
 def _auth_or_current(auth: tuple[str, str] | None, current: dict[str, Any], prefix: str) -> tuple[str, str]:
@@ -1440,7 +1614,15 @@ class ESP500Device(NETIODevice):
         ws_topic = "protocols/mqtt/config"
 
         self.logger.debug(f"Getting MQTT flex state on device {self.host}")
-        return ws_api.send_request(self, ws_type, ws_topic)["data"]
+        state: dict[str, Any] = ws_api.send_request(self, ws_type, ws_topic)["data"]
+        if not state:
+            return state
+        try:
+            config: Any = json.loads(state["config"])
+        except (TypeError, ValueError):
+            # TypeError: short of memory the device returns null in place of the config
+            raise CommunicationError(f"Device {self.host} returned an MQTT config that isn't JSON") from None
+        return {**state, "config": config}
 
     @override
     def get_outputs_data(self) -> list[dict[str, Any]]:
@@ -1472,18 +1654,86 @@ class ESP500Device(NETIODevice):
         return states[output_id]
 
     def set_mqttflex_state(self, state: bool | None = None, config: dict[str, Any] | None = None) -> None:
-        ws_type = "SET"
+        ws_type = "SUBSCRIBE"
         ws_topic = "protocols/mqtt/config"
 
         self.logger.debug(f"Setting MQTT flex state to {state} on device {self.host}")
-        current = self._require_config(self.get_mqttflex_state(), "MQTT flex")
+        config_text = _mqtt_config_text(config) if config is not None else None
+        # Read unparsed: the config the device has goes back as the string it sent
+        current = self._require_config(ws_api.send_request(self, ws_type, ws_topic)["data"], "MQTT flex")
+        if config_text is None and not isinstance(current["config"], str):
+            raise CommunicationError(f"Device {self.host} returned no MQTT config to send back with the state")
+        ws_type = "SET"
         ws_data = {
             "enable": _value_or_current(state, current, "enable"),
-            # The device returns the config JSON-encoded; only encode a given dict.
-            "config": json.dumps(config, ensure_ascii=False) if config is not None else current["config"],
+            "config": config_text if config_text is not None else current["config"],
         }
-        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        # Sent once: a config the device aborts on would restart it again with every repeat
+        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data, resend=False)
         sleep(1)
+        if config is not None:
+            self._require_mqtt_stored(config)
+        if ws_data["enable"]:
+            self._require_mqtt_applied()
+
+    def _require_mqtt_stored(self, config: dict[str, Any]) -> None:
+        """
+        Raises DeviceError with the code ConfigNotApplied when the device holds another config than the one sent. It
+        answers OK to a config it then fails to write, and keeps the one before.
+        """
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/mqtt/config"
+        deadline = perf_counter() + MQTT_APPLY_TIMEOUT
+        while True:
+            state = self._require_config(ws_api.send_request(self, ws_type, ws_topic)["data"], "MQTT flex")
+            held_text = state["config"]
+            if isinstance(held_text, str) and held_text:
+                break
+            # Short of memory the device returns null or nothing for the config: for a moment while it stores the
+            # config, or for good when it failed to
+            if perf_counter() >= deadline:
+                reason = "The device answered OK, but returns no config"
+                raise DeviceError(self.host, "SET", ws_topic, "ConfigNotApplied", reason)
+            sleep(1)
+        try:
+            held: Any = json.loads(held_text)
+        except ValueError:
+            # The device returns strings unescaped, so a config with a quote in one, such as a JSON payload, reads
+            # back as text that can't be parsed or compared
+            self.logger.warning(
+                f"Device {self.host} returned its MQTT config as text that isn't JSON, so whether it stored the "
+                "config that was set can't be checked"
+            )
+            return
+        difference = _mqtt_difference(config, held, "config")
+        if difference is not None:
+            reason = f"The device answered OK, but doesn't hold the config that was sent: {difference}"
+            raise DeviceError(self.host, "SET", ws_topic, "ConfigNotApplied", reason)
+
+    def _require_mqtt_applied(self) -> None:
+        """
+        Raises DeviceError with the code ConfigNotApplied when MQTT is enabled and not running. The device answers OK
+        to a config it then doesn't apply, and says why only in its log.
+        """
+        ws_type = "SUBSCRIBE"
+        ws_topic = "protocols/info"
+        deadline = perf_counter() + MQTT_APPLY_TIMEOUT
+        while True:
+            if ws_api.send_request(self, ws_type, ws_topic)["data"]["active"]["mqtt"]:
+                return
+            if perf_counter() >= deadline:
+                break
+            sleep(MQTT_APPLY_INTERVAL)
+        reason = "MQTT is enabled, but the device didn't apply its config"
+        entries: list[dict[str, Any]] = []
+        try:
+            entries = [entry for entry in self.get_system_log() if entry["type"] in MQTT_LOG_TYPES]
+        except UnauthorizedError:
+            # Without can_browse_logs the reason stays unknown
+            pass
+        if entries:
+            reason = f"{reason}. Its log says: {entries[-1]['message']}"
+        raise DeviceError(self.host, "SET", "protocols/mqtt/config", "ConfigNotApplied", reason)
 
     def upload_https_private_key(self, keyfile: str) -> None:
         topic = "system/srvkeyupload"

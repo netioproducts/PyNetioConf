@@ -1504,7 +1504,12 @@ class NETIODevice(ABC):
 
         Returns
         -------
-            JSON/dict object containing the current state of MQTT Flex and its configuration.
+            A dict with `enable` and `config`, the MQTT configuration as a dict.
+
+        Raises
+        ------
+        CommunicationError
+            The device returned a configuration that isn't JSON.
         """
         pass
 
@@ -1524,6 +1529,20 @@ class NETIODevice(ABC):
             present on device.
         config: dict
             A dict object containing the desired MQTT configuration to upload to the device.
+
+        Raises
+        ------
+        InvalidParameterValueError
+            The configuration is one the firmware doesn't apply or crashes on, such as a missing `broker` key, an event
+            without `type` or a subscribe entry without `action`, or it is longer than 8192 bytes as JSON. Nothing is
+            sent.
+        DeviceError
+            With the code `ConfigNotApplied`: the device answered OK and doesn't hold the configuration that was sent,
+            or it stored the configuration, and MQTT is enabled but not running. The message says which, with the
+            reason from the device's log when the user may read it.
+        CommunicationError
+            The device didn't answer, or the connection dropped after the request went out, which usually means the
+            device restarted on it. The request isn't sent a second time.
         """
         pass
 
