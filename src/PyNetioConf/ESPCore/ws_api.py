@@ -12,8 +12,11 @@ from typing import Any, NamedTuple
 from websocket import WebSocket, WebSocketConnectionClosedException, WebSocketTimeoutException
 
 from PyNetioConf.constants import (
+    HTTPS_DELAY_FACTOR,
+    LATENCY_DELAY_STEPS,
     UPLOAD_CHUNK_PAUSE,
     UPLOAD_CHUNK_TIMEOUT,
+    WIFI_DELAY_FACTOR,
     WS_EXECUTION_DELAY,
     WS_RECONNECT_INTERVAL,
     WS_RECONNECT_TIMEOUT,
@@ -47,6 +50,31 @@ class _FileChunk(NamedTuple):
     index: int
     bytes_from: int
     bytes_to: int
+
+
+def _delay_factor(device: NETIODevice) -> float:
+    """The factor on the pauses after a request and between upload chunks, for the device's link."""
+    factor = 1.0
+    reasons: list[str] = []
+    if device._on_wifi:
+        factor *= WIFI_DELAY_FACTOR
+        reasons.append("Wi-Fi")
+    smoothed = device._latency.smoothed
+    if smoothed is not None:
+        for threshold, step in LATENCY_DELAY_STEPS:
+            if smoothed > threshold:
+                factor *= step
+                reasons.append(f"latency over {threshold * 1000:.0f} ms")
+    if device.use_https:
+        factor *= HTTPS_DELAY_FACTOR
+        reasons.append("HTTPS")
+    if factor != device._delay_factor:
+        device._delay_factor = factor
+        logger.debug(
+            f"Request delay for {device.host}: {WS_EXECUTION_DELAY * factor * 1000:.0f} ms "
+            f"({', '.join(reasons) or 'base'})"
+        )
+    return factor
 
 
 def send_request(
@@ -103,11 +131,14 @@ def send_request(
             if device.ws is None:
                 raise ConnectionError("Couldn't establish a WebSocket connection")
             sent = False
+            # Due to internal timers it is safer to wait after sending to not overwhelm the device
+            delay = WS_EXECUTION_DELAY * _delay_factor(device)
+            started = perf_counter()
             device.ws.send(json.dumps(request, ensure_ascii=False))
             sent = True
-            sleep(
-                WS_EXECUTION_DELAY  # TODO: Tie to device/NM
-            )  # Due to internal timers it is safer to wait after sending to not overwhelm the device
+            # The pauses below aren't the device's response time
+            paused = delay
+            sleep(delay)
             device.ws_req_id += 1
 
             # Since we do not look for events we should not leave a hanging SUBSCRIBE on the websocket
@@ -121,9 +152,8 @@ def send_request(
                     unsubscribe_request["topic"] = ws_topic
                 logger.debug(f"Sending request to {device.host} with payload {unsubscribe_request}")
                 device.ws.send(json.dumps(unsubscribe_request, ensure_ascii=False))
-                sleep(
-                    WS_EXECUTION_DELAY
-                )  # Due to internal timers it is safer to wait after sending to not overwhelm the device
+                paused += delay
+                sleep(delay)
                 device.ws_req_id += 1
 
             # Create a more proper message filtering
@@ -178,6 +208,7 @@ def send_request(
                 else:
                     logger.debug(f"Ignored event: {message}")
 
+            device._latency.record(max(perf_counter() - started - paused, 0.0))
             reply: dict[str, Any] = message_data if message_data else json.loads(message)
             _check_reply(reply, device.host, ws_type, ws_topic)
             return reply
@@ -208,6 +239,9 @@ def send_request(
         except (AuthError, DeviceError):
             # A refused login from reconnecting, or a request the device refused, is not a communication problem
             raise
+        except WebSocketTimeoutException as e:
+            device._latency.record_timeout()
+            raise CommunicationError(f"Failed to send request to {device.host}", str(e))
         except Exception as e:
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
 
@@ -331,6 +365,8 @@ def upload_file(
                     last,
                 )
             except _NO_REPLY as e:
+                if isinstance(e, WebSocketTimeoutException) and not restarts:
+                    device._latency.record_timeout()
                 if restarts:
                     logger.debug(f"Device {device.host} didn't answer the last chunk ({type(e).__name__}), restarting")
                     return
@@ -338,7 +374,7 @@ def upload_file(
             if reply["status"] != "OK":
                 raise CommunicationError(f"Device {device.host} refused {position}: {reply}")
             if not last:
-                sleep(UPLOAD_CHUNK_PAUSE)
+                sleep(UPLOAD_CHUNK_PAUSE * _delay_factor(device))
     finally:
         device.ws.settimeout(timeout)
 
@@ -384,6 +420,7 @@ def chunk_file_upload(
         raise CommunicationError("No websocket connection associated with the device")
     logger.debug(f"Sending request to {device.host} with payload {_debug_request}")
     req_id = ws_request["reqId"]
+    started = perf_counter()
     device.ws.send(json.dumps(ws_request, ensure_ascii=False))
     device.ws_req_id += 1
     while True:
@@ -392,6 +429,7 @@ def chunk_file_upload(
         reply: dict[str, Any] = json.loads(chunk_reply)
         # Events and late replies to earlier requests come in between
         if "reqId" in reply and reply["reqId"] == req_id:
+            device._latency.record(perf_counter() - started)
             return reply
 
 

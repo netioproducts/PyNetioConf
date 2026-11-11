@@ -1,7 +1,11 @@
 from enum import StrEnum
 
 # Timings and timeouts
-WS_EXECUTION_DELAY = 0.035  # Serves to give breathing room to the internal device timers and reduce unwanted restarts
+WS_EXECUTION_DELAY = 0.03  # Serves to give breathing room to the internal device timers and reduce unwanted restarts
+# Factors on WS_EXECUTION_DELAY and UPLOAD_CHUNK_PAUSE: on Wi-Fi, over HTTPS, and per smoothed latency above a threshold
+WIFI_DELAY_FACTOR = 1.5
+HTTPS_DELAY_FACTOR = 1.75
+LATENCY_DELAY_STEPS = ((0.075, 1.15), (0.250, 1.15))  # (seconds, factor), each step on top of the ones below it
 WS_DEFAULT_TIMEOUT = 60
 WS_RECONNECT_TIMEOUT = 60  # How long a request keeps reconnecting after the connection dropped, e.g. during a reboot
 WS_RECONNECT_INTERVAL = 10  # Minimum time between the starts of two reconnects

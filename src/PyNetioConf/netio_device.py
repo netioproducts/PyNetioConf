@@ -26,6 +26,7 @@ from .constants import (
     SnmpSecurityLevel,
     TemperatureUnit,
 )
+from .latency import LatencyStats
 
 if TYPE_CHECKING:
     from .NetioManager import NetioManager
@@ -75,6 +76,10 @@ class NETIODevice(ABC):
         self.use_https = use_https
         self._request_queue: deque[dict[str, Any]] = deque()
         self._pong_queue: deque[dict[str, Any]] = deque()
+        self._latency = LatencyStats()
+        # Whether the device reaches the network over Wi-Fi, which lengthens the request delay
+        self._on_wifi = False
+        self._delay_factor = 1.0
         self.version = (0, 0, 0)
         if use_https:
             from urllib3 import disable_warnings

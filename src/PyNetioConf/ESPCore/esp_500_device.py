@@ -94,6 +94,7 @@ from ..exceptions import (
     InvalidSocketIndex,
     UnauthorizedError,
 )
+from ..latency import LatencyStats
 from ..netio_device import NETIODevice
 from . import esp_api, ws_api
 
@@ -419,6 +420,9 @@ class ESP500Device(NETIODevice):
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        self._latency = LatencyStats()
+        self._on_wifi = False
+        self._delay_factor = 1.0
         # Last answer of get_firmware_updates_list() and its perf_counter() time, reused for FIRMWARE_LIST_CACHE_TIME
         self._firmware_list: list[dict[str, Any]] | None = None
         self._firmware_list_time = 0.0
@@ -457,7 +461,22 @@ class ESP500Device(NETIODevice):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
+        self._on_wifi = bool(_system_info["wifiSupport"]) and self._detect_wifi()
         self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
+
+    def _detect_wifi(self) -> bool:
+        """Whether the device reaches the network over Wi-Fi: its Ethernet isn't connected and its Wi-Fi is."""
+        self.logger.debug(f"Checking whether device {self.host} is on Wi-Fi")
+        try:
+            ethernet = bool(self.supported_features["eth"]) and (
+                self.get_ethernet_status()["connectionStatus"] == "Connected"
+            )
+            wifi = self.get_wifi_status()["connectionStatus"] == "Connected"
+        except (CommunicationError, DeviceError):
+            # Taken for Wi-Fi, so the delays err on the long side
+            self.logger.debug(f"Couldn't read the network status of device {self.host}, taking it for Wi-Fi")
+            return True
+        return wifi and not ethernet
 
     def _keep_alive(self) -> None:
         self.logger.debug(
@@ -554,6 +573,7 @@ class ESP500Device(NETIODevice):
     @override
     def logout(self) -> None:
         self.logger.debug(f"Logging out of device {self.host}")
+        self.logger.debug(f"Latency of {self.host}: {self._latency.summary()}")
         # The keep-alive would log in again and open a new session. The next login starts it again.
         if self._ka_thread:
             self._ka_thread.cancel()

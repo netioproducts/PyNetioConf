@@ -9,6 +9,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Changed
 
+- On 5.x firmware the pause after each request is 30 ms instead of 35 ms, and it and the 0.1 s pause between upload
+  chunks grow on Wi-Fi (×1.5), over HTTPS (×1.75) and with a slow device (×1.15 above 75 ms, ×1.15 more above 250 ms).
+  Connecting reads the Ethernet and Wi-Fi status, two more requests.
+
 - `import_config()` raises `InvalidParameterValueError` for a file that isn't a JSON object, or isn't a path or a file
   object, before sending anything. It raised `json.JSONDecodeError`, `TypeError` or `AttributeError`, which breaks code
   that caught those.

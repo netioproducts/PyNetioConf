@@ -44,6 +44,7 @@ from ..exceptions import (
     ProtocolNotEnabled,
 )
 from ..experimental import experimental
+from ..latency import LatencyStats
 from . import ws_api
 from .esp_500_device import _check_milliseconds, _choice_value, _value_or_current
 from .esp_520_device import ESP520Device
@@ -151,6 +152,9 @@ class ESP540Device(ESP520Device):
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        self._latency = LatencyStats()
+        self._on_wifi = False
+        self._delay_factor = 1.0
         # Last answer of get_firmware_updates_list() and its perf_counter() time, reused for FIRMWARE_LIST_CACHE_TIME
         self._firmware_list: list[dict[str, Any]] | None = None
         self._firmware_list_time = 0.0
@@ -189,6 +193,7 @@ class ESP540Device(ESP520Device):
         self.input_count = _system_info["inputCount"]
         self.supported_features["wifi"] = _system_info["wifiSupport"]
         self.supported_features["eth"] = _system_info["ethSupport"]
+        self._on_wifi = bool(_system_info["wifiSupport"]) and self._detect_wifi()
         self._ws_helo_data = kwargs.get("ws_helo_data") or ws_api.send_request(self, "HELO")
 
     @override
