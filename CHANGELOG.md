@@ -13,6 +13,10 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
   chunks grow on Wi-Fi (×1.5), over HTTPS (×1.75) and with a slow device (×1.15 above 75 ms, ×1.15 more above 250 ms).
   Connecting reads the Ethernet and Wi-Fi status, two more requests.
 
+- `upload_mqtt_ca_certificate()`, `upload_mqtt_client_certificate()`, `upload_mqtt_client_key()`,
+  `upload_https_certificate()` and `upload_https_private_key()` raise `InvalidParameterValueError` before sending a
+  file that is empty, larger than 8192 bytes, or not PEM of its kind: certificates, or one unencrypted private key.
+  They sent any file, which the device stored.
 - `import_config()` raises `InvalidParameterValueError` for a file that isn't a JSON object, or isn't a path or a file
   object, before sending anything. It raised `json.JSONDecodeError`, `TypeError` or `AttributeError`, which breaks code
   that caught those.

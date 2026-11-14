@@ -1469,36 +1469,39 @@ class NETIODevice(ABC):
     @abstractmethod
     def upload_mqtt_client_key(self, key: str) -> None:
         """
-        Upload a MQTT client private key to the device.
+        Upload a MQTT client private key to the device. On 5.x firmware raises InvalidParameterValueError, before
+        anything is sent, unless it is one unencrypted private key as PEM of at most 8192 bytes.
 
         Parameters
         ----------
         key: str
-            The private key to upload to the device.
+            The private key to upload to the device, as PEM text.
         """
         pass
 
     @abstractmethod
     def upload_mqtt_client_certificate(self, cert: str) -> None:
         """
-        Uploads the MQTT client certificate to the device.
+        Uploads the MQTT client certificate to the device. On 5.x firmware raises InvalidParameterValueError,
+        before anything is sent, unless it is a certificate as PEM of at most 8192 bytes.
 
         Parameters
         ----------
         cert: str
-            The client certificate to upload to the device.
+            The client certificate to upload to the device, as PEM text.
         """
         pass
 
     @abstractmethod
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
         """
-        Uploads the root CA certificate to the device.
+        Uploads the root CA certificate to the device. On 5.x firmware raises InvalidParameterValueError, before
+        anything is sent, unless it is PEM text with one or more certificates of at most 8192 bytes together.
 
         Parameters
         ----------
         ca: str
-            The root CA certificate to upload.
+            The root CA certificate to upload, as PEM text.
         """
         pass
 
@@ -2394,6 +2397,8 @@ class NETIODevice(ABC):
         ------
         FeatureNotSupported
             The device runs firmware older than 5.0.0.
+        InvalidParameterValueError
+            The file is empty, larger than 8192 bytes, or doesn't hold one unencrypted private key as PEM. Nothing is sent.
         """
         pass
 
@@ -2416,6 +2421,8 @@ class NETIODevice(ABC):
         ------
         FeatureNotSupported
             The device runs firmware older than 5.0.0.
+        InvalidParameterValueError
+            The file is empty, larger than 8192 bytes, or doesn't hold certificates as PEM. Nothing is sent.
         """
         pass
 

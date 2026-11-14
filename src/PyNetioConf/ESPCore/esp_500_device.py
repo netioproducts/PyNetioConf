@@ -3,9 +3,11 @@ Implementation specifics for ESP devices with the firmware 5.0.x.
 """
 
 import atexit
+import base64
 import io
 import json
 import os
+import re
 import sys
 from collections import deque
 from enum import StrEnum
@@ -67,6 +69,10 @@ from ..constants import (
     OUTPUT_DELAY_MAX,
     OUTPUT_POWER_UP_INTERVAL_MIN,
     OUTPUT_RESET_DELAY_MIN,
+    PEM_CERTIFICATE,
+    PEM_FILE_MAX,
+    PEM_KEY_EXTRAS,
+    PEM_PRIVATE_KEY,
     UPLOAD_RESTART_REPLY_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
@@ -128,6 +134,46 @@ def _load_config_file(file: Any) -> dict[str, Any]:
         raise InvalidParameterValueError("The configuration file isn't valid JSON") from None
     if not isinstance(data, dict):
         raise InvalidParameterValueError(f"The configuration has to be a JSON object, not {type(data).__name__}")
+    return data
+
+
+_PEM_BLOCK = re.compile(r"-----BEGIN ([A-Z0-9 ]+)-----(.*?)-----END \1-----", re.DOTALL)
+
+
+def _check_pem(content: Any, private_key: bool, name: str) -> bytes:
+    """
+    The content of a certificate file, or with private_key of a key file, as bytes. Raises
+    InvalidParameterValueError unless it is PEM text of that kind and at most PEM_FILE_MAX bytes: the device stores
+    whatever it is sent, and a file it can't read leaves it without the key or certificate. Only the PEM frame is
+    checked, not what the blocks hold.
+    """
+    if not isinstance(content, (str, bytes)):
+        raise InvalidParameterValueError(f"The {name} has to be PEM text, not {type(content).__name__}")
+    data = content.encode("utf-8") if isinstance(content, str) else content
+    if not data.strip():
+        raise InvalidParameterValueError(f"The {name} is empty")
+    if len(data) > PEM_FILE_MAX:
+        raise InvalidParameterValueError(f"The {name} has {len(data)} bytes, the device takes {PEM_FILE_MAX}")
+    try:
+        text = data.decode("ascii")
+    except UnicodeDecodeError:
+        raise InvalidParameterValueError(f"The {name} isn't PEM text") from None
+    wanted = PEM_PRIVATE_KEY if private_key else PEM_CERTIFICATE
+    allowed = wanted + PEM_KEY_EXTRAS if private_key else wanted
+    labels: list[str] = []
+    for label, body in _PEM_BLOCK.findall(text):
+        try:
+            _ = base64.b64decode("".join(body.split()), validate=True)
+        except ValueError:
+            raise InvalidParameterValueError(f"The {name} has a {label} block that isn't base64") from None
+        labels.append(label)
+    unexpected = [label for label in labels if label not in allowed]
+    found = [label for label in labels if label in wanted]
+    if unexpected or not found or (private_key and len(found) != 1):
+        expected = "one unencrypted private key" if private_key else "certificates"
+        raise InvalidParameterValueError(
+            f"The {name} has to hold {expected} as PEM, it holds {labels or 'no PEM block'}"
+        )
     return data
 
 
@@ -1600,33 +1646,36 @@ class ESP500Device(NETIODevice):
         return self.get_outputs_data()
 
     def upload_mqtt_client_key(self, key: str) -> None:
+        content = _check_pem(key, True, "MQTT client key")
         ws_type = "SET"
         ws_topic = "protocols/mqtt/clientkeyupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client key to device {self.host}.")
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
-        _ = esp_api.send_file(self, upload_path, key)
+        _ = esp_api.send_file(self, upload_path, content)
         sleep(0.1)
 
     def upload_mqtt_client_certificate(self, cert: str) -> None:
+        content = _check_pem(cert, False, "MQTT client certificate")
         ws_type = "SET"
         ws_topic = "protocols/mqtt/clientcertupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT client certificate to device {self.host}.")
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
-        _ = esp_api.send_file(self, upload_path, cert)
+        _ = esp_api.send_file(self, upload_path, content)
         sleep(0.1)
 
     def upload_mqtt_ca_certificate(self, ca: str) -> None:
+        content = _check_pem(ca, False, "MQTT CA certificate")
         ws_type = "SET"
         ws_topic = "protocols/mqtt/cacertupload"
         ws_data: dict[str, Any] = {}
 
         self.logger.debug(f"Uploading MQTT CA certificate to device {self.host}.")
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
-        _ = esp_api.send_file(self, upload_path, ca)
+        _ = esp_api.send_file(self, upload_path, content)
         sleep(0.1)
 
     def get_mqttflex_state(self) -> dict[str, Any]:
@@ -1759,21 +1808,23 @@ class ESP500Device(NETIODevice):
         topic = "system/srvkeyupload"
         ws_type = "SET"
         ws_data: dict[str, Any] = {}
-        self.logger.debug(f"Uploading https private key for https to device {self.host}.")
         with open(keyfile, "rb") as f:
-            endpoint_data = ws_api.send_request(self, ws_type, topic, ws_data)
-            endpoint = endpoint_data["data"]["uploadPath"]
-            esp_api.send_file(self, endpoint, f)
+            content = _check_pem(f.read(), True, "HTTPS private key")
+        self.logger.debug(f"Uploading https private key for https to device {self.host}.")
+        endpoint_data = ws_api.send_request(self, ws_type, topic, ws_data)
+        endpoint = endpoint_data["data"]["uploadPath"]
+        esp_api.send_file(self, endpoint, content)
 
     def upload_https_certificate(self, certfile: str) -> None:
         topic = "system/srvcertupload"
         ws_type = "SET"
         ws_data = {}
-        self.logger.debug("Uploading https certificate for https.")
         with open(certfile, "rb") as f:
-            endpoint_data = ws_api.send_request(self, ws_type, topic, ws_data)
-            endpoint = endpoint_data["data"]["uploadPath"]
-            esp_api.send_file(self, endpoint, f)
+            content = _check_pem(f.read(), False, "HTTPS certificate")
+        self.logger.debug("Uploading https certificate for https.")
+        endpoint_data = ws_api.send_request(self, ws_type, topic, ws_data)
+        endpoint = endpoint_data["data"]["uploadPath"]
+        esp_api.send_file(self, endpoint, content)
 
     def export_config(self, save_file: str | None = None) -> dict[str, Any]:
         ws_type = "SET"

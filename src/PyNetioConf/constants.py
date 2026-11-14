@@ -77,6 +77,12 @@ MQTT_APPLY_TIMEOUT = 5  # How long set_mqttflex_state waits for the device to ap
 MQTT_APPLY_INTERVAL = 0.5  # Time between two reads of protocols/info while waiting
 MQTT_LOG_TYPES = ("MQTT", "Variable parser")  # The log entries that say why a config wasn't applied
 
+# Key and certificate uploads for HTTPS and MQTT (5.x): PEM files
+PEM_FILE_MAX = 8192  # Bytes, the web interface's limit; the firmware has none
+PEM_CERTIFICATE = ("CERTIFICATE",)  # The PEM blocks a certificate file holds
+PEM_PRIVATE_KEY = ("PRIVATE KEY", "EC PRIVATE KEY", "RSA PRIVATE KEY")  # The unencrypted keys the firmware reads
+PEM_KEY_EXTRAS = ("EC PARAMETERS",)  # Blocks a key file may hold besides its key
+
 # NBUS discover, firmware 5.4.0+
 NBUS_DISCOVER_TIMEOUT = 35  # How long discover_nbus_devices waits for the devices found to report, the device 30 s
 NBUS_DISCOVER_SEARCH = 2  # The search itself, before any device found can report; under a second on the line
