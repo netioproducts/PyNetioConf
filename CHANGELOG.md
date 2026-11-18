@@ -90,6 +90,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `get_input_data()` raises `InvalidSocketIndex` for input numbers below 1. It returned the last input for 0 and
   negative numbers.
 - `update_firmware()` works on firmware 5.1.x. It used the deprecated `/api` and failed before uploading.
+- A second `update_firmware()` or online update through the same device object no longer raises `CommunicationError`
+  ("Device could not be reinstated after update") after the device has updated.
 - `get_firmware_updates_list()`, `is_update_available()` and `update_firmware_online()` no longer raise
   `KeyError: 'items'` on firmware 5.1.x.
 - `export_config()` returns a dict on firmware 5.1.x instead of a JSON string, and `save_file` no longer encodes it

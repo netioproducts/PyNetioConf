@@ -88,19 +88,30 @@ class NetioManager:
         -------
             The updated device object.
         """
+        index = self._device_index(netio_device)
+        updated_device = esp_device_init.initialize_esp(
+            netio_device.host,
+            netio_device.username,
+            netio_device.password,
+            netio_device._keep_alive_flag,
+            self,
+            netio_device.use_https,
+            **kwargs,
+        )
+        self._connected_devices[index] = updated_device
+        return updated_device
+
+    def _device_index(self, netio_device: NETIODevice) -> int:
+        """
+        The device's place in the device list: the object itself, else the entry for its host, which an earlier update
+        through the same object put there.
+        """
         for index, device in enumerate(self._connected_devices):
             if device is netio_device:
-                updated_device = esp_device_init.initialize_esp(
-                    device.host,
-                    device.username,
-                    device.password,
-                    device._keep_alive_flag,
-                    self,
-                    device.use_https,
-                    **kwargs,
-                )
-                self._connected_devices[index] = updated_device
-                return updated_device
+                return index
+        for index, device in enumerate(self._connected_devices):
+            if device.host == netio_device.host:
+                return index
         raise CommunicationError("Device could not be reinstated after update.")
 
     @staticmethod
