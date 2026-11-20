@@ -31,6 +31,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Added
 
+- The device's methods are also available in groups: `device.outputs.set(1, True)` for `device.set_output(1, True)`,
+  `device.rules.create(...)`, `device.protocols.mqtt.set_state(...)`. The groups are `outputs` (with `outputs.groups`),
+  `inputs`, `measurement`, `nbus`, `rules`, `watchdogs`, `pabs`, `schedules`, `users`, `network`, `system`, `firmware`
+  and `protocols` with one group per protocol. `PyNetioConf.groups.GROUPED` maps every method to its grouped name.
+  The methods on the device itself stay; `login()`, `logout()` and `ping()` have no group.
 - `set_output_power_up_state(output_id, state)` with an `OutputPowerUpState` from `constants` (`ON`, `OFF`, `LAST`), and
   `set_output_power_up_interval(output_id, power_up_interval)` in milliseconds, on 5.x firmware.
 - `reset_global_consumption_counter()` resets the consumption counter of all outputs together on 5.x firmware.

@@ -75,9 +75,12 @@ nm = NetioManager()
 
 device = nm.init_device("powerpdu-8qs.netio-products.com", "demo", "demo")
 
-# You can now control and configure the device using its class methods
-# To check all the available methods check the NETIODevice class documentation.
-device.set_output(1, False)
+# You can now control and configure the device. Its methods are grouped by what they work with: device.outputs,
+# device.inputs, device.measurement, device.nbus, device.rules, device.watchdogs, device.pabs, device.schedules,
+# device.users, device.network, device.system, device.firmware and device.protocols (device.protocols.mqtt, ...).
+# Every grouped method is also a method of the device itself, where its full documentation is:
+# device.outputs.set() is device.set_output(). To check all of them see the NETIODevice class documentation.
+device.outputs.set(1, False)
 
 # While some cases should be universally available on all device versions, some featuers require
 # certain firmware versions or user permissions, to be sure consult the NETIODevice class documentation.*
@@ -87,14 +90,14 @@ from PyNetioConf.exceptions import FeatureNotSupported
 
 try:
     # MQTT certificate auth is only available on version 5.0.x or later
-    device.upload_mqtt_ca_certificate("certificate_string")
+    device.protocols.mqtt.upload_ca_certificate("certificate_string")
 except FeatureNotSupported as e:
     print("Device doesn't support MQTT cert authentication.")
 
 # or
 
 try:
-    device.set_output(1, True)
+    device.outputs.set(1, True)
 except PermissionError as e:
     print("Logged in account doesn't have permissions to alter output states.")
 ```

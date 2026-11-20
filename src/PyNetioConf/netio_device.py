@@ -9,6 +9,7 @@ import os
 import threading
 from abc import ABC, abstractmethod
 from collections import deque
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Optional
 from xml.etree.ElementTree import Element
 
@@ -25,6 +26,21 @@ from .constants import (
     SnmpPrivProtocol,
     SnmpSecurityLevel,
     TemperatureUnit,
+)
+from .groups import (
+    Firmware,
+    Inputs,
+    Measurement,
+    Nbus,
+    Network,
+    Outputs,
+    Pabs,
+    Protocols,
+    Rules,
+    Schedules,
+    System,
+    Users,
+    Watchdogs,
 )
 from .latency import LatencyStats
 
@@ -90,6 +106,75 @@ class NETIODevice(ABC):
         # Keep an instace of NetioManager for updating device classes during
         # firmware updates.
         self.netio_manager = netio_manager
+
+    # region Groups
+    # The methods below, grouped: device.outputs.set(1, True) is device.set_output(1, True). groups.py has the table.
+    @cached_property
+    def outputs(self) -> Outputs:
+        """Output control, output configuration and, under `groups`, the output groups."""
+        return Outputs(self)
+
+    @cached_property
+    def inputs(self) -> Inputs:
+        """The inputs."""
+        return Inputs(self)
+
+    @cached_property
+    def measurement(self) -> Measurement:
+        """The device's measurement and the consumption counters."""
+        return Measurement(self)
+
+    @cached_property
+    def nbus(self) -> Nbus:
+        """The NBUS line."""
+        return Nbus(self)
+
+    @cached_property
+    def rules(self) -> Rules:
+        """The rules."""
+        return Rules(self)
+
+    @cached_property
+    def watchdogs(self) -> Watchdogs:
+        """The watchdogs."""
+        return Watchdogs(self)
+
+    @cached_property
+    def pabs(self) -> Pabs:
+        """The PABs."""
+        return Pabs(self)
+
+    @cached_property
+    def schedules(self) -> Schedules:
+        """The schedules."""
+        return Schedules(self)
+
+    @cached_property
+    def users(self) -> Users:
+        """The users and their privileges."""
+        return Users(self)
+
+    @cached_property
+    def network(self) -> Network:
+        """Ethernet, Wi-Fi, the device's servers and the HTTPS certificate."""
+        return Network(self)
+
+    @cached_property
+    def system(self) -> System:
+        """The device itself: versions, settings, time, restart, configuration files and the log."""
+        return System(self)
+
+    @cached_property
+    def firmware(self) -> Firmware:
+        """Firmware updates."""
+        return Firmware(self)
+
+    @cached_property
+    def protocols(self) -> Protocols:
+        """The M2M protocols, each under its own name."""
+        return Protocols(self)
+
+    # endregion
 
     # region Session
     @abstractmethod

@@ -25,16 +25,16 @@ DEVICE_CERTIFICATE_PATH = "/path/to/device/cert.pem"
 # Upload the device key and certificate we get from the connection package
 with open(PRIVATE_KEY_PATH) as private_key:
     key = private_key.read()
-    netio_device.upload_mqtt_client_key(key)
+    netio_device.protocols.mqtt.upload_client_key(key)
 
 with open(DEVICE_CERTIFICATE_PATH) as device_cert:
     certificate = device_cert.read()
-    netio_device.upload_mqtt_client_certificate(certificate)
+    netio_device.protocols.mqtt.upload_client_certificate(certificate)
 
 # To upload the Amazon CA certificate, we're going to download it from Amazon's cloud, but
 # the same procedure as the device key/certificate could be used if you have the file downloaded
 root_ca = requests.get("https://www.amazontrust.com/repository/AmazonRootCA1.pem").text
-netio_device.upload_mqtt_ca_certificate(root_ca)
+netio_device.protocols.mqtt.upload_ca_certificate(root_ca)
 
 # Now that we have the certificates in place, we need to enable the MQTT protocol and set our configuration
 # To do this we can either load a configuration from a file, or use on in place, for this example I'm going
@@ -75,6 +75,6 @@ device_config = {
 }
 
 # Now we upload the config to the device and enable the MQTT protocol
-netio_device.set_mqttflex_state(True, device_config)
+netio_device.protocols.mqtt.set_state(True, device_config)
 
 # That's it, we now have a device connected to Amazon's IoT cloud

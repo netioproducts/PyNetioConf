@@ -21,11 +21,11 @@ DEVICE_LIST = [
 for device_info in DEVICE_LIST:
     device = netio_manager.init_device(device_info[0], device_info[1], device_info[2])
     # We check the device version before upgrading the firmware
-    old_version = device.get_version()
+    old_version = device.system.get_version()
     # print(old_version) # We can print it to check it before the update
     # Then we run the device update, note that this might take quite a while depending on the device
     with open(FW_FILE, "rb") as fw:
-        device = device.update_firmware(fw)
+        device = device.firmware.update(fw)
     # And after all that is done we compare the device version again.
-    new_version = device.get_version()
+    new_version = device.system.get_version()
     print(f"Updated device with host: {device_info[0]} from {old_version} to {new_version}.")
