@@ -12,6 +12,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - On 5.x firmware the pause after each request is 30 ms instead of 35 ms, and it and the 0.1 s pause between upload
   chunks grow on Wi-Fi (×1.5), over HTTPS (×1.75) and with a slow device (×1.15 above 75 ms, ×1.15 more above 250 ms).
   Connecting reads the Ethernet and Wi-Fi status, two more requests.
+- On an NBUS master (firmware 5.4.0), switching or configuring a client's output or input no longer reads the output
+  or input list before every request. The list is read once, and again when an id isn't in it. An output that left
+  the master since is refused by the device, as `DeviceError` or `CommunicationError`, not as `InvalidSocketIndex`.
 
 - `upload_mqtt_ca_certificate()`, `upload_mqtt_client_certificate()`, `upload_mqtt_client_key()`,
   `upload_https_certificate()` and `upload_https_private_key()` raise `InvalidParameterValueError` before sending a

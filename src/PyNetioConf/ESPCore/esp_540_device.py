@@ -158,6 +158,10 @@ class ESP540Device(ESP520Device):
         # Last answer of get_firmware_updates_list() and its perf_counter() time, reused for FIRMWARE_LIST_CACHE_TIME
         self._firmware_list: list[dict[str, Any]] | None = None
         self._firmware_list_time = 0.0
+        # The ids outputs/list and inputs/list gave last, None before the first read and after a change of the NBUS
+        # line: an NBUS master lists its clients' outputs and inputs after its own
+        self._listed_outputs: frozenset[int] | None = None
+        self._listed_inputs: frozenset[int] | None = None
 
         # Init from base ESP Device
         self.ws: WebSocket | None = kwargs.get("ws_connection", None)
@@ -207,13 +211,35 @@ class ESP540Device(ESP520Device):
         return [(int(item["id"]), item["state"] == "on") for item in items]
 
     @override
+    def get_outputs_list(self) -> list[dict[str, Any]]:
+        items = super().get_outputs_list()
+        self._listed_outputs = frozenset(int(item["id"]) for item in items)
+        return items
+
+    @override
+    def get_input_list(self) -> dict[str, Any]:
+        response = super().get_input_list()
+        self._listed_inputs = frozenset(int(item["id"]) for item in response["items"])
+        return response
+
+    def _forget_listed(self) -> None:
+        """After a change of the NBUS line, which gives the clients' outputs and inputs other ids."""
+        self._listed_outputs = None
+        self._listed_inputs = None
+
+    @override
     def _check_socket_index(self, socket_index: int) -> None:
         # output_count is the device's own outputs; an NBUS master lists its clients' outputs after them
         if socket_index > self.output_count:
-            outputs = [int(item["id"]) for item in self.get_outputs_list()]
-            if socket_index not in outputs:
+            # The list is read once, and again for an id that isn't in it, not before every request. An output that
+            # went since is refused by the device
+            listed = self._listed_outputs
+            if listed is None or socket_index not in listed:
+                listed = frozenset(int(item["id"]) for item in self.get_outputs_list())
+            if socket_index not in listed:
                 raise InvalidSocketIndex(
-                    f"You tried to access output {socket_index}, the device {self.host} has the outputs {outputs}."
+                    f"You tried to access output {socket_index}, the device {self.host} has the outputs "
+                    f"{sorted(listed)}."
                 )
             return
         super()._check_socket_index(socket_index)
@@ -241,10 +267,13 @@ class ESP540Device(ESP520Device):
     def _check_input_index(self, input_id: int) -> None:
         # input_count is the device's own inputs; an NBUS master lists its clients' inputs after them
         if input_id > self.input_count:
-            inputs = [int(item["id"]) for item in self.get_input_list()["items"]]
-            if input_id not in inputs:
+            # Read once and again for an id that isn't in it, like the outputs
+            listed = self._listed_inputs
+            if listed is None or input_id not in listed:
+                listed = frozenset(int(item["id"]) for item in self.get_input_list()["items"])
+            if input_id not in listed:
                 raise InvalidSocketIndex(
-                    f"You tried to access input {input_id}, the device {self.host} has the inputs {inputs}."
+                    f"You tried to access input {input_id}, the device {self.host} has the inputs {sorted(listed)}."
                 )
             return
         super()._check_input_index(input_id)
@@ -422,6 +451,7 @@ class ESP540Device(ESP520Device):
             "maxOutputCount": current["maxOutputCount"],
         }
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self._forget_listed()
 
     @override
     @experimental("NBUS", "5.4.0")
@@ -444,6 +474,8 @@ class ESP540Device(ESP520Device):
         start = perf_counter()
         sleep(min(NBUS_DISCOVER_SEARCH, timeout))
         while True:
+            # Forgotten at every round, so a list read while the search ran doesn't stay
+            self._forget_listed()
             devices = self.get_nbus_devices()
             waiting = [
                 device["deviceSN"]
@@ -453,6 +485,7 @@ class ESP540Device(ESP520Device):
             ]
             if not waiting:
                 sleep(NBUS_DISCOVER_SAVE)
+                self._forget_listed()
                 return self.get_nbus_devices()
             if perf_counter() - start >= timeout:
                 self.logger.warning(
@@ -494,6 +527,7 @@ class ESP540Device(ESP520Device):
 
         self.logger.debug(f"Deleting the NBUS device {device_sn} on device {self.host}")
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self._forget_listed()
 
     @override
     @experimental("NBUS", "5.4.0")
@@ -521,6 +555,7 @@ class ESP540Device(ESP520Device):
 
         self.logger.debug(f"Setting the NBUS device order to {order} on device {self.host}")
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        self._forget_listed()
 
     @override
     @experimental("NBUS", "5.4.0")
