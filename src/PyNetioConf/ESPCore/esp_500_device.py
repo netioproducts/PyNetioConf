@@ -557,6 +557,7 @@ class ESP500Device(NETIODevice):
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        self._ws_lock = threading.RLock()
         self._latency = LatencyStats()
         self._on_wifi = False
         self._delay_factor = 1.0
@@ -623,6 +624,12 @@ class ESP500Device(NETIODevice):
 
     @override
     def login(self, username: str, password: str, logout: bool = False) -> str:
+        # The connection is replaced here: no other thread's request may be on it meanwhile
+        with self._ws_lock:
+            return self._login(username, password, logout)
+
+    def _login(self, username: str, password: str, logout: bool) -> str:
+        """login() once the device's connection is this thread's."""
         if logout:
             # Drops the current connection, which usually ended with a device restart, and logs in on a new one
             ws_api.close_connection(self.ws, graceful=False)

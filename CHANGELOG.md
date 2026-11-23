@@ -112,6 +112,13 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `get_rules()`, `get_pabs()`, `get_watchdogs()`, `get_schedules()`, their enabled and disabled lists,
   `get_schedule_id()`, `get_schedule_names()` and `delete_schedule()` raise on a reply without its items, names or
   ids instead of returning an empty list or nothing.
+- Requests on one 5.x device from several threads no longer mix their replies: a request, a login and a whole file
+  upload each have the connection to themselves. The keep-alive thread could read the reply of a request in flight,
+  or send its ping between two chunks of an upload; it now skips a ping while the device is in a request.
+- A reply to another request, such as a late one, is passed over while a request waits for its own. A later request's
+  reply arriving first raised `CommunicationError("Failed to send request")`, or was returned as the reply.
+- A request waits for its reply for the connection's timeout in all. Events arriving meanwhile each started the wait
+  again.
 - `get_active_schedules()` returns the schedules with an interval that covers the device's local time on 5.x firmware,
   from each schedule's intervals and the device's clock. It always returned an empty list there.
 - `get_input_data()` raises `InvalidSocketIndex` for input numbers below 1. It returned the last input for 0 and

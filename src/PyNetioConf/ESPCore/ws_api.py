@@ -6,7 +6,7 @@ import math
 import random
 from collections.abc import Generator
 from io import BufferedIOBase
-from time import perf_counter, sleep
+from time import monotonic, perf_counter, sleep
 from typing import Any, NamedTuple
 
 from PyNetioConf.constants import (
@@ -41,6 +41,35 @@ def _check_reply(reply: dict[str, Any], host: str, ws_type: str, topic: str | No
     if code == "Unauthorized":
         raise UnauthorizedError(host, ws_type, topic, code, message)
     raise DeviceError(host, ws_type, topic, code, message)
+
+
+def _receive(ws: Connection, req_id: int, host: str, device: NETIODevice | None = None) -> dict[str, Any]:
+    """
+    Reads the connection until the reply to request req_id comes, and returns it. An EVENT that comes meanwhile is
+    dropped. Another request's reply, such as a late one or an UNSUBSCRIBE's, is passed over and kept in the device's
+    queues.
+
+    Raises
+    ------
+    WebSocketTimeoutError
+        The reply didn't come within the connection's timeout, counted from the call, whatever else came.
+    WebSocketClosedError
+        The connection is closed.
+    """
+    timeout = ws.gettimeout()
+    deadline = None if timeout is None else monotonic() + timeout
+    while True:
+        message = ws.recv(deadline)
+        logger.debug(f"Received response from {host} with payload {message}")
+        reply: dict[str, Any] = json.loads(message)
+        if reply.get("type") == "EVENT":
+            logger.debug(f"Ignored event from {host}")
+            continue
+        if device is not None:
+            (device._pong_queue if reply.get("type") == "PONG" else device._request_queue).append(reply)
+        if reply.get("reqId") == req_id:
+            return reply
+        logger.debug(f"Passed over the reply to request {reply.get('reqId')} of {host}, waiting for {req_id}")
 
 
 class _FileChunk(NamedTuple):
@@ -103,6 +132,15 @@ def send_request(
     -------
         Upon successful communication returns the direct API response from the device to be further parsed.
     """
+    # One request at a time on a device's connection: the keep-alive runs in a thread of its own
+    with device._ws_lock:
+        return _send_request(device, ws_type, ws_topic, ws_data, resend)
+
+
+def _send_request(
+    device: NETIODevice, ws_type: str, ws_topic: str | None, ws_data: dict[str, Any] | None, resend: bool
+) -> dict[str, Any]:
+    """send_request() once the device's connection is this thread's."""
     if device.ws is None:
         device.login(device.username, device.password)
 
@@ -155,60 +193,9 @@ def send_request(
                 sleep(delay)
                 device.ws_req_id += 1
 
-            # Create a more proper message filtering
-            waiting_for_reply = True
-            while waiting_for_reply:
-                message = device.ws.recv()
-                logger.debug(f"Received response {message}")
-                message_data = json.loads(message)
-                if message_data["type"] != "EVENT":
-                    if message_data["type"] == "PONG":
-                        device._pong_queue.append(message_data)
-                    else:
-                        device._request_queue.append(message_data)
-                    try:
-                        if message_data["reqId"] == expected_reqest_id:
-                            waiting_for_reply = False
-                            logger.debug(f"Processing correct request {message_data['reqId']}")
-                            break
-                        elif message_data["reqId"] > expected_reqest_id:
-                            if message_data["type"] == "PONG":
-                                match = next(
-                                    (
-                                        dq_req_id
-                                        for dq_req_id in device._pong_queue
-                                        if dq_req_id.get("reqId") == expected_reqest_id
-                                    ),
-                                    None,
-                                )
-                            else:
-                                match = next(
-                                    (
-                                        dq_req_id
-                                        for dq_req_id in device._request_queue
-                                        if dq_req_id.get("reqId") == expected_reqest_id
-                                    ),
-                                    None,
-                                )
-                            if match:
-                                logger.debug(f"Processing correct request {message_data['reqId']}")
-                                break
-                            else:
-                                raise NotImplementedError
-
-                        else:
-                            logger.debug(
-                                f"Processing wrong message: [{message_data['reqId']}], continuing to next one."
-                            )
-                    except KeyError:
-                        # We shouldn't be able to get here with queuing since we filter EVENTs completely now
-                        logger.debug(f"Throwing away websocket message: {message}")
-                        continue
-                else:
-                    logger.debug(f"Ignored event: {message}")
+            reply = _receive(device.ws, expected_reqest_id, device.host, device)
 
             device._latency.record(max(perf_counter() - started - paused, 0.0))
-            reply: dict[str, Any] = message_data if message_data else json.loads(message)
             _check_reply(reply, device.host, ws_type, ws_topic)
             return reply
         except WebSocketClosedError:
@@ -334,6 +321,13 @@ def upload_file(
     Set last_reply_timeout when the device restarts once the upload ends: the last chunk's reply is awaited that long,
     and a missing one is taken for the restart.
     """
+    # The whole upload is one use of the connection: a keep-alive between two chunks would read a chunk's reply
+    with device._ws_lock:
+        _upload_file(device, file, upload_id, last_reply_timeout)
+
+
+def _upload_file(device: NETIODevice, file: BufferedIOBase, upload_id: str, last_reply_timeout: float | None) -> None:
+    """upload_file() once the device's connection is this thread's."""
     if device.ws is None:
         raise CommunicationError("No websocket connection associated with the device")
     CHUNK_SIZE = 2048
@@ -418,14 +412,9 @@ def chunk_file_upload(
     started = perf_counter()
     device.ws.send(json.dumps(ws_request, ensure_ascii=False))
     device.ws_req_id += 1
-    while True:
-        chunk_reply = device.ws.recv()
-        logger.debug(f"Received response from {device.host} with payload {chunk_reply}")
-        reply: dict[str, Any] = json.loads(chunk_reply)
-        # Events and late replies to earlier requests come in between
-        if "reqId" in reply and reply["reqId"] == req_id:
-            device._latency.record(perf_counter() - started)
-            return reply
+    reply = _receive(device.ws, req_id, device.host, device)
+    device._latency.record(perf_counter() - started)
+    return reply
 
 
 def generate_salt() -> str:
@@ -483,11 +472,9 @@ def login(device: NETIODevice, timestamp: int, public_key: str, username: str, p
         device.ws.send(json.dumps(request, ensure_ascii=False))
         logger.debug(f"Sending authentication request to {device.host}, payload: {request}")
         device.ws_req_id += 1
-        message = device.ws.recv()
+        reply = _receive(device.ws, request["reqId"], device.host, device)
     except Exception as e:
         raise CommunicationError(f"Failed to log in to {device.host}", str(e))
-    logger.debug(f"Received authentication response from {device.host}, payload: {message}")
-    reply: dict[str, Any] = json.loads(message)
     _check_auth_reply(reply, device.host)
     return reply
 
@@ -513,10 +500,7 @@ def device_init_login(
     }
     ws.send(json.dumps(request, ensure_ascii=False))
     logger.debug(f"Sending authentication request to {host}, payload: {request}")
-    ws_req_id += 1
-    message = ws.recv()
-    logger.debug(f"Received authentication response from {host}, payload: {message}")
-    reply: dict[str, Any] = json.loads(message)
+    reply = _receive(ws, ws_req_id, host)
     _check_auth_reply(reply, host)
     return reply
 
@@ -557,22 +541,7 @@ def device_init_request(
                 unsubscribe_request["topic"] = topic
             logger.debug(f"Sending request to {host} with payload {unsubscribe_request}")
             ws.send(json.dumps(unsubscribe_request, ensure_ascii=False))
-        ws_req_id += 1
-        message = ws.recv()
-        # Create a more proper message filtering
-        waiting_for_reply = True
-        while waiting_for_reply:
-            try:
-                if json.loads(message)["reqId"] == expected_reqest_id:
-                    waiting_for_reply = False
-                else:
-                    logger.debug(f"Throwing away websocket message: {message}")
-                    message = ws.recv()
-            except KeyError:
-                logger.debug(f"Throwing away websocket message: {message}")
-                message = ws.recv()
-        logger.debug(f"Received response from {host} with payload {message}")
-        reply: dict[str, Any] = json.loads(message)
+        reply = _receive(ws, expected_reqest_id, host)
         _check_reply(reply, host, type, topic)
         return reply
     except DeviceError:

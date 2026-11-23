@@ -145,6 +145,7 @@ class ESP520Device(ESP500Device):
 
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        self._ws_lock = threading.RLock()
         self._latency = LatencyStats()
         self._on_wifi = False
         self._delay_factor = 1.0
@@ -416,4 +417,12 @@ class ESP520Device(ESP500Device):
         self._ka_thread = threading.Timer(120, self._keep_alive)
         self._ka_thread.daemon = True
         self._ka_thread.start()
-        self.ping()
+        # Never waits for the connection: a login cancels this thread and waits for it while it holds the connection,
+        # and a request in flight keeps the session open anyway
+        if not self._ws_lock.acquire(blocking=False):
+            self.logger.debug(f"Device {self.host} is in a request, no keep-alive needed")
+            return
+        try:
+            self.ping()
+        finally:
+            self._ws_lock.release()

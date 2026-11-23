@@ -8,6 +8,7 @@ import logging
 import os
 import ssl
 import threading
+import time
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -191,9 +192,10 @@ class Connection:
         except (ConnectionClosed, OSError) as error:
             raise WebSocketClosedError(f"The connection to {self.url} is closed: {error!r}") from error
 
-    def recv(self) -> str | bytes:
+    def recv(self, deadline: float | None = None) -> str | bytes:
         """
-        Waits for the next message and returns it, text as str.
+        Waits for the next message and returns it, text as str: for the connection's timeout, or until deadline, a
+        time.monotonic() value, when one is given.
 
         Raises
         ------
@@ -202,11 +204,12 @@ class Connection:
         WebSocketClosedError
             The connection is closed.
         """
+        timeout = self._timeout if deadline is None else max(deadline - time.monotonic(), 0.0)
         with self._recv_lock:
             try:
-                return self._run(self._recv(self._timeout))
+                return self._run(self._recv(timeout))
             except TimeoutError as error:
-                raise WebSocketTimeoutError(f"No message from {self.url} in {self._timeout} s") from error
+                raise WebSocketTimeoutError(f"No message from {self.url} in {timeout} s") from error
             except (ConnectionClosed, OSError) as error:
                 raise WebSocketClosedError(f"The connection to {self.url} is closed: {error!r}") from error
 

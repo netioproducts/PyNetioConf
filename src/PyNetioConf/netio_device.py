@@ -91,6 +91,8 @@ class NETIODevice(ABC):
         self.use_https = use_https
         self._request_queue: deque[dict[str, Any]] = deque()
         self._pong_queue: deque[dict[str, Any]] = deque()
+        # Held for a whole request on the WebSocket connection, by whichever thread makes it
+        self._ws_lock = threading.RLock()
         self._latency = LatencyStats()
         # Whether the device reaches the network over Wi-Fi, which lengthens the request delay
         self._on_wifi = False

@@ -152,6 +152,7 @@ class ESP540Device(ESP520Device):
         # of PyNetioConf. PING PONG topics also cause potential desynchronization
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
+        self._ws_lock = threading.RLock()
         self._latency = LatencyStats()
         self._on_wifi = False
         self._delay_factor = 1.0
