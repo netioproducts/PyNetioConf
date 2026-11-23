@@ -157,6 +157,7 @@ class ESP540Device(ESP520Device):
         self._event_queue = deque(maxlen=EVENT_QUEUE_LEN)
         self._events_dropped = 0
         self._event_condition = threading.Condition()
+        self._subscriptions = set()
         self._latency = LatencyStats()
         self._on_wifi = False
         self._delay_factor = 1.0
@@ -170,7 +171,7 @@ class ESP540Device(ESP520Device):
 
         # Init from base ESP Device
         self.ws: Connection | None = kwargs.get("ws_connection", None)
-        ws_api.attach_events(self)
+        ws_api.connection_opened(self)
         self.logger = logging.getLogger(__name__)
         self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):

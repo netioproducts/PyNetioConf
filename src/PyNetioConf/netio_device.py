@@ -100,6 +100,8 @@ class NETIODevice(ABC):
         self._event_queue: deque[Event] = deque(maxlen=EVENT_QUEUE_LEN)
         self._events_dropped = 0
         self._event_condition = threading.Condition()
+        # The topics held by ws_api._raw_request() with SUBSCRIBE on the present connection
+        self._subscriptions: set[str] = set()
         self._latency = LatencyStats()
         # Whether the device reaches the network over Wi-Fi, which lengthens the request delay
         self._on_wifi = False

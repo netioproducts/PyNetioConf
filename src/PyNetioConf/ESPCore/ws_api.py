@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import random
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from functools import partial
 from io import BufferedIOBase
 from time import monotonic, perf_counter, sleep, time
@@ -75,17 +75,76 @@ def _sort_message(device: NETIODevice, message: str | bytes, received: float) ->
     return True
 
 
-def attach_events(device: NETIODevice) -> None:
-    """Has the device's connection hand its events to the device's event queue as they come."""
+def connection_opened(device: NETIODevice) -> None:
+    """
+    For every new connection of a device: has it hand its events to the device's event queue as they come, and forgets
+    the subscriptions, which the device held for the connection before it.
+    """
     if device.ws is not None:
         device.ws.set_sorter(partial(_sort_message, device))
+    if device._subscriptions:
+        logger.debug(f"The subscriptions of {device.host} ended with its connection: {sorted(device._subscriptions)}")
+        device._subscriptions.clear()
+
+
+def _events(device: NETIODevice, topic: str | None = None, since: float | None = None) -> list[Event]:
+    """The events in the device's queue, the oldest first: all, those of a topic, or those since a time.monotonic()."""
+    with device._event_condition:
+        return [
+            event
+            for event in device._event_queue
+            if (topic is None or event.topic == topic) and (since is None or event.received >= since)
+        ]
+
+
+def _clear_events(device: NETIODevice) -> None:
+    """Empties the device's event queue."""
+    with device._event_condition:
+        device._event_queue.clear()
+
+
+def _wait_for_event(
+    device: NETIODevice,
+    topic: str,
+    timeout: float,
+    match: Callable[[Event], bool] | None = None,
+    since: float | None = None,
+) -> Event | None:
+    """
+    Waits for an event of a topic the device is subscribed to (_raw_request() with SUBSCRIBE) and returns it, or None
+    when none came within timeout seconds. An event carries the topic's data as it was then, which can still be the
+    state before a change: say with match which event counts, or read the topic afterwards.
+
+    Parameters
+    ----------
+    topic : str
+        The topic the event has to be of.
+    timeout : float
+        How long to wait, in seconds.
+    match : Callable[[Event], bool] | None
+        Whether an event counts. None for any event of the topic.
+    since : float | None
+        The time.monotonic() from which an event counts, for one that may come before this call, such as a mark taken
+        before the request that causes it. None for the time of the call.
+    """
+    start = monotonic() if since is None else since
+    deadline = monotonic() + timeout
+    with device._event_condition:
+        while True:
+            for event in device._event_queue:
+                if event.received >= start and event.topic == topic and (match is None or match(event)):
+                    return event
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                return None
+            device._event_condition.wait(remaining)
 
 
 def _receive(ws: Connection, req_id: int, host: str, device: NETIODevice | None = None) -> dict[str, Any]:
     """
     Reads the connection until the reply to request req_id comes, and returns it. Another request's reply, such as a
     late one or an UNSUBSCRIBE's, is passed over and kept in the device's queues. An EVENT the connection's reader
-    didn't take, which is one that came before attach_events(), goes to the device's event queue here.
+    didn't take, which is one that came before connection_opened(), goes to the device's event queue here.
 
     Raises
     ------
@@ -173,24 +232,50 @@ def send_request(
     """
     # One request at a time on a device's connection: the keep-alive runs in a thread of its own
     with device._ws_lock:
-        return _send_request(device, ws_type, ws_topic, ws_data, resend)
+        return _send_request(device, ws_type, ws_topic, ws_data, resend, raw=False)
+
+
+def _raw_request(
+    device: NETIODevice,
+    ws_type: str,
+    ws_topic: str | None = None,
+    ws_data: dict[str, Any] | None = None,
+    resend: bool = True,
+) -> dict[str, Any]:
+    """
+    Sends a request exactly as given and returns the reply, where send_request() reads: a SUBSCRIBE stays a SUBSCRIBE on
+    firmware 5.4.0 and newer, and no UNSUBSCRIBE follows it. The device then sends an event with the topic's data
+    whenever the topic changes, which go to the device's event queue (_wait_for_event(), _events()), until an
+    UNSUBSCRIBE of the topic or the end of the connection. A topic is subscribed or not: a second SUBSCRIBE reads it,
+    and one UNSUBSCRIBE ends it.
+
+    Raises what send_request() raises.
+    """
+    with device._ws_lock:
+        reply = _send_request(device, ws_type, ws_topic, ws_data, resend, raw=True)
+        if ws_topic and ws_type == "SUBSCRIBE":
+            device._subscriptions.add(ws_topic)
+        elif ws_topic and ws_type == "UNSUBSCRIBE":
+            device._subscriptions.discard(ws_topic)
+        return reply
 
 
 def _send_request(
-    device: NETIODevice, ws_type: str, ws_topic: str | None, ws_data: dict[str, Any] | None, resend: bool
+    device: NETIODevice, ws_type: str, ws_topic: str | None, ws_data: dict[str, Any] | None, resend: bool, raw: bool
 ) -> dict[str, Any]:
-    """send_request() once the device's connection is this thread's."""
+    """send_request() and _raw_request() once the device's connection is this thread's."""
     if device.ws is None:
         device.login(device.username, device.password)
 
-    if device.version:
+    if device.version and not raw:
         if (device.version[0] > 5 or (device.version[0] == 5 and device.version[1] >= 4)) and ws_type == "SUBSCRIBE":
             ws_type = "GET"
 
     request: dict[str, Any] = {"type": ws_type, "reqId": device.ws_req_id}
     unsubscribe_needed = False
     expected_reqest_id = device.ws_req_id
-    if ws_type == "SUBSCRIBE":
+    # A read by SUBSCRIBE ends its subscription at once, unless the topic is held: the UNSUBSCRIBE would end that too
+    if ws_type == "SUBSCRIBE" and not raw and ws_topic not in device._subscriptions:
         unsubscribe_needed = True
     if ws_topic:
         request["topic"] = ws_topic
