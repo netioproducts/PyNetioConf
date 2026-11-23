@@ -66,6 +66,25 @@ OUTPUT_POWER_UP_INTERVAL_MIN = 0
 OUTPUT_DELAY_MAX = 4294967295
 OUTPUT_GROUP_COUNT = 4  # Firmware 5.4.0+ has the output groups 1 to 4; nothing creates or deletes one
 
+# Rules, PABs, watchdogs and schedules (5.x): the limits of their topic table, and the config keys without which the
+# firmware drops a watchdog or PAB or a rule never acts
+BLOCK_NAME_MAX = 15  # Bytes as UTF-8
+BLOCK_CONFIG_MAX = 1024  # Bytes of the config as JSON
+RULE_CONFIG_REQUIRED = ("conditions", "actions")
+WATCHDOG_CONFIG_REQUIRED = ("target", "pingInterval", "maxTimeouts", "timeToReboot", "maxRestarts")
+PAB_CONFIG_REQUIRED: dict[str, tuple[str, ...]] = {
+    "RANGE": ("source", "lowerBound", "upperBound", "timeHysteresis"),
+    "ZONES": ("source", "thresholds", "timeHysteresis"),
+    "DAYLIGHT": (),  # The firmware's own location stands in for a missing latitude or longitude
+}
+SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+SCHEDULE_FROM_MAX = 86399  # Seconds since midnight
+SCHEDULE_TO_MAX = 86400
+# A create waits this long before it reads the new element, for the device to settle after it
+BLOCK_CREATE_SETTLE = 1.0
+BLOCK_LISTED_TIMEOUT = 5  # How long a create waits for the device to list the new element
+BLOCK_LISTED_INTERVAL = 0.2  # Time between two reads of the list while waiting
+
 # MQTT config, what the firmware takes (5.x)
 MQTT_BROKER_REQUIRED = ("url", "port", "type", "username", "password", "protocol")
 MQTT_PROTOCOLS = ("mqtt", "mqtts")

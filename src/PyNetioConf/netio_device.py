@@ -1626,7 +1626,7 @@ class NETIODevice(ABC):
         Raises
         ------
         InvalidParameterValueError
-            The configuration is one the firmware doesn't apply or crashes on, such as a missing `broker` key, an event
+            The configuration is one the firmware doesn't apply or handle, such as a missing `broker` key, an event
             without `type` or a subscribe entry without `action`, or it is longer than 8192 bytes as JSON. Nothing is
             sent.
         DeviceError
@@ -2038,14 +2038,21 @@ class NETIODevice(ABC):
         enable : bool
             Whether the rule is enabled once it's created.
         name : str
-            Name of the rule to create.
+            Name of the rule to create, 1 to 15 characters without "/".
         config : dict[str, Any]
             The rule's configuration with its "conditions", "filters" and "actions", in the format of the "config" that
-            get_rule_by_name() returns.
+            get_rule_by_name() returns. "conditions" and "actions" are required, and the config takes at most 1024
+            bytes as JSON.
 
-        Returns
-        -------
-
+        Raises
+        ------
+        ElementAlreadyExists
+            A rule of that name exists.
+        InvalidParameterValueError
+            enable isn't a bool, the name or the config is outside the limits above.
+        CommunicationError
+            The device doesn't give the new rule within 5 s. The method returns once it does,
+            at least 1 s after the device's answer.
         """
         pass
 
@@ -2069,7 +2076,7 @@ class NETIODevice(ABC):
         ElementNotFound
             There is no rule of that name.
         InvalidParameterValueError
-            enabled isn't a bool, or config isn't a dict.
+            enabled isn't a bool, or config is outside the limits of create_rule().
         """
         pass
 
@@ -2160,14 +2167,21 @@ class NETIODevice(ABC):
         enable : bool
             Whether the watchdog is enabled once it's created.
         name : str
-            Name of the watchdog to create.
+            Name of the watchdog to create, 1 to 15 characters without "/".
         config : dict[str, Any]
             The watchdog's configuration, such as "target", "pingInterval", "timeout" and "maxRestarts", in the format
-            of the "config" that get_watchdog_by_name() returns.
+            of the "config" that get_watchdog_by_name() returns. "target", "pingInterval", "maxTimeouts",
+            "timeToReboot" and "maxRestarts" are required, and the config takes at most 1024 bytes as JSON.
 
-        Returns
-        -------
-
+        Raises
+        ------
+        ElementAlreadyExists
+            A watchdog of that name exists.
+        InvalidParameterValueError
+            enable isn't a bool, the name or the config is outside the limits above.
+        CommunicationError
+            The device doesn't give the new watchdog within 5 s. The method returns once it does,
+            at least 1 s after the device's answer.
         """
         pass
 
@@ -2191,7 +2205,7 @@ class NETIODevice(ABC):
         ElementNotFound
             There is no watchdog of that name.
         InvalidParameterValueError
-            enabled isn't a bool, or config isn't a dict.
+            enabled isn't a bool, or config is outside the limits of create_watchdog().
         """
         pass
 
@@ -2215,13 +2229,21 @@ class NETIODevice(ABC):
         Parameters
         ----------
         name : str
-            Name of the schedule to create. Raises ElementAlreadyExists if a schedule of given name is already present.
+            Name of the schedule to create, 1 to 15 characters without "/".
         intervals : list[dict]
-            A list of intervals where the schedule will be active.
+            A list of intervals where the schedule will be active, each with "from" (0 to 86399) and "to" (0 to 86400)
+            in seconds since midnight and the days "mon" to "sun" as booleans. At least one: the firmware up to 5.4.0
+            doesn't handle a schedule without intervals.
 
-        Returns
-        -------
-
+        Raises
+        ------
+        ElementAlreadyExists
+            A schedule of that name exists.
+        InvalidParameterValueError
+            The name or an interval is outside the limits above.
+        CommunicationError
+            The device doesn't give the new schedule within 5 s. The method returns once it does,
+            at least 1 s after the device's answer.
         """
 
     @abstractmethod
@@ -2236,14 +2258,14 @@ class NETIODevice(ABC):
             The name of the schedule.
         intervals : list[dict]
             The intervals, as for create_schedule(): "from" and "to" in seconds since midnight and the days "mon" to
-            "sun" as booleans.
+            "sun" as booleans, at least one.
 
         Raises
         ------
         ElementNotFound
             There is no schedule of that name.
         InvalidParameterValueError
-            intervals isn't a list of dicts.
+            An interval is outside the limits of create_schedule().
         """
         pass
 
@@ -2412,14 +2434,22 @@ class NETIODevice(ABC):
         enable : bool
             Whether the PAB is enabled once it's created.
         name : str
-            Name of the PAB to create.
+            Name of the PAB to create, 1 to 15 characters without "/".
         config : dict[str, Any]
             The PAB's configuration, such as "type", "source", "lowerBound" and "upperBound", in the format of the
-            "config" that get_pab_by_name() returns.
+            "config" that get_pab_by_name() returns. "type" is "RANGE", "ZONES" or "DAYLIGHT"; RANGE needs "source",
+            "lowerBound", "upperBound" and "timeHysteresis", ZONES "source", "thresholds" and "timeHysteresis". The
+            config takes at most 1024 bytes as JSON.
 
-        Returns
-        -------
-
+        Raises
+        ------
+        ElementAlreadyExists
+            A PAB of that name exists.
+        InvalidParameterValueError
+            enable isn't a bool, the name or the config is outside the limits above.
+        CommunicationError
+            The device doesn't give the new PAB within 5 s. The method returns once it does,
+            at least 1 s after the device's answer.
         """
         pass
 
@@ -2443,7 +2473,7 @@ class NETIODevice(ABC):
         ElementNotFound
             There is no PAB of that name.
         InvalidParameterValueError
-            enabled isn't a bool, or config isn't a dict.
+            enabled isn't a bool, or config is outside the limits of create_pab().
         """
         pass
 

@@ -308,7 +308,7 @@ class ESP540Device(ESP520Device):
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     def _check_group_index(self, group_id: int, minimum: int = 1) -> None:
-        """The device stores any groupId (F12), so the range is checked here."""
+        """The device stores any groupId, so the range is checked here."""
         if isinstance(group_id, bool) or not isinstance(group_id, int) or not minimum <= group_id <= OUTPUT_GROUP_COUNT:
             raise InvalidParameterValueError(
                 f"The group id has to be a whole number from {minimum} to {OUTPUT_GROUP_COUNT}, not {group_id!r}"
@@ -480,7 +480,7 @@ class ESP540Device(ESP520Device):
             waiting = [
                 device["deviceSN"]
                 for device in devices
-                # A device listed after a boot with NBUS disabled has no outputs field (F27)
+                # A device listed after a boot with NBUS disabled has no outputs field
                 if device["status"] == "Online" and not ("outputs" in device and device["outputs"])
             ]
             if not waiting:

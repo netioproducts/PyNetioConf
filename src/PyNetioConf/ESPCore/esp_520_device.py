@@ -337,7 +337,7 @@ class ESP520Device(ESP500Device):
             with open(file, "rb") as config_file:
                 return self.import_config(config_file, **kwargs)
         data = _load_config_file(file)
-        # UTF-8, not \u escapes: an escape followed by about 150 characters crashes the device (F52)
+        # UTF-8, not \u escapes, which the firmware doesn't handle when about 150 characters follow
         file = io.BytesIO(json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
         self.logger.debug(f"Importing configuration to host {self.host}")

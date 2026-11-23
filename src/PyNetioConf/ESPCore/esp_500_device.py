@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from collections import deque
+from collections.abc import Callable
 from enum import StrEnum
 from time import perf_counter, sleep
 from xml.etree.ElementTree import Element
@@ -37,6 +38,11 @@ from websocket import WebSocket
 
 from .. import NetioManager
 from ..constants import (
+    BLOCK_CONFIG_MAX,
+    BLOCK_CREATE_SETTLE,
+    BLOCK_LISTED_INTERVAL,
+    BLOCK_LISTED_TIMEOUT,
+    BLOCK_NAME_MAX,
     CONFIG_IMPORT_RESTART_TIMEOUT,
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_PASSWORD,
@@ -69,14 +75,20 @@ from ..constants import (
     OUTPUT_DELAY_MAX,
     OUTPUT_POWER_UP_INTERVAL_MIN,
     OUTPUT_RESET_DELAY_MIN,
+    PAB_CONFIG_REQUIRED,
     PEM_CERTIFICATE,
     PEM_FILE_MAX,
     PEM_KEY_EXTRAS,
     PEM_PRIVATE_KEY,
+    RULE_CONFIG_REQUIRED,
+    SCHEDULE_DAYS,
+    SCHEDULE_FROM_MAX,
+    SCHEDULE_TO_MAX,
     UPLOAD_RESTART_REPLY_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
     USER_PRIVILEGES,
+    WATCHDOG_CONFIG_REQUIRED,
     WEB_SERVER_RESTART_INTERVAL,
     WEB_SERVER_RESTART_TIMEOUT,
     NbusRole,
@@ -187,6 +199,78 @@ def _check_milliseconds(value: int, minimum: int, name: str) -> None:
         )
 
 
+def _check_enabled(value: Any) -> None:
+    """Raises InvalidParameterValueError unless value is a bool: the firmware stores anything else as sent or as off."""
+    if not isinstance(value, bool):
+        raise InvalidParameterValueError(f"enabled has to be a bool, not {value!r}")
+
+
+def _check_block_name(name: Any, kind: str) -> None:
+    """
+    Raises InvalidParameterValueError unless name is a string of 1 to BLOCK_NAME_MAX bytes as UTF-8 without a slash. The
+    firmware stores other names, and one with a slash can't be read or changed through its name topic.
+    """
+    if not isinstance(name, str) or not 1 <= len(name.encode()) <= BLOCK_NAME_MAX or "/" in name:
+        raise InvalidParameterValueError(
+            f"The {kind} name has to be a string of 1 to {BLOCK_NAME_MAX} characters without '/', not {name!r}"
+        )
+
+
+def _block_config_text(config: Any, kind: str) -> str:
+    """
+    The config of a rule, PAB or watchdog as the JSON string to send. Raises InvalidParameterValueError for one that
+    isn't a dict, lacks a key without which the firmware drops it or never acts on it, or is longer than the topic
+    takes.
+    """
+    if not isinstance(config, dict):
+        raise InvalidParameterValueError(f"The config has to be a dict, not {config!r}")
+    required: tuple[str, ...]
+    if kind == "PAB":
+        if "type" not in config or not isinstance(config["type"], str) or config["type"] not in PAB_CONFIG_REQUIRED:
+            raise InvalidParameterValueError(f"A PAB's config needs a 'type' of {list(PAB_CONFIG_REQUIRED)}")
+        required = PAB_CONFIG_REQUIRED[config["type"]]
+    else:
+        required = RULE_CONFIG_REQUIRED if kind == "rule" else WATCHDOG_CONFIG_REQUIRED
+    missing = [key for key in required if key not in config]
+    if missing:
+        raise InvalidParameterValueError(f"The {kind}'s config lacks {missing}")
+    text = json.dumps(config, ensure_ascii=False)
+    size = len(text.encode())
+    if size > BLOCK_CONFIG_MAX:
+        raise InvalidParameterValueError(
+            f"The {kind}'s config is {size} bytes long as JSON, the device takes {BLOCK_CONFIG_MAX}"
+        )
+    return text
+
+
+def _check_intervals(intervals: Any) -> None:
+    """
+    Raises InvalidParameterValueError unless intervals is a non-empty list of dicts, each with a whole number of seconds
+    as 'from' (0 to SCHEDULE_FROM_MAX) and 'to' (0 to SCHEDULE_TO_MAX) and a bool for each day, as the firmware needs.
+    """
+    if not isinstance(intervals, list):
+        raise InvalidParameterValueError(f"The intervals have to be a list of dicts, not {intervals!r}")
+    # The firmware up to 5.4.0 doesn't handle a schedule without intervals: accept an empty list on the firmware that
+    # does
+    if not intervals:
+        raise InvalidParameterValueError("A schedule needs at least one interval on this firmware")
+    for number, interval in enumerate(intervals, 1):
+        if not isinstance(interval, dict):
+            raise InvalidParameterValueError(f"Interval {number} has to be a dict, not {interval!r}")
+        missing = [key for key in ("from", "to", *SCHEDULE_DAYS) if key not in interval]
+        if missing:
+            raise InvalidParameterValueError(f"Interval {number} lacks {missing}")
+        for key, maximum in (("from", SCHEDULE_FROM_MAX), ("to", SCHEDULE_TO_MAX)):
+            value = interval[key]
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+                raise InvalidParameterValueError(
+                    f"Interval {number}: {key!r} has to be a whole number of seconds from 0 to {maximum}, not {value!r}"
+                )
+        not_bool = [day for day in SCHEDULE_DAYS if not isinstance(interval[day], bool)]
+        if not_bool:
+            raise InvalidParameterValueError(f"Interval {number}: {not_bool} have to be bools")
+
+
 def _mqtt_number(value: Any) -> float | None:
     """value as a number when it is one or a string of one, as the firmware takes both. None otherwise."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
@@ -221,7 +305,7 @@ def _check_mqtt_qos(entry: dict[str, Any], where: str) -> None:
 def _check_mqtt_events(entry: dict[str, Any], where: str) -> None:
     for number, event in enumerate(_mqtt_entries(entry, "events", where), 1):
         at = f"{where}, event {number}"
-        # Without a type the firmware crashes
+        # The firmware needs a type
         if "type" not in event or event["type"] not in MQTT_EVENT_TYPES:
             raise InvalidParameterValueError(f"MQTT config, {at}: 'type' has to be one of {MQTT_EVENT_TYPES}")
         if event["type"] == "timer":
@@ -308,7 +392,7 @@ def _mqtt_difference(sent: Any, held: Any, where: str) -> str | None:
 
 def _check_mqtt_config(config: Any) -> None:
     """
-    Raises InvalidParameterValueError for an MQTT config that crashes the firmware or that it doesn't apply. The device
+    Raises InvalidParameterValueError for an MQTT config that the firmware can't handle or doesn't apply. The device
     answers OK to any config, so nothing else would tell. Variable names and unknown keys aren't checked.
     """
     if not isinstance(config, dict) or "broker" not in config:
@@ -331,8 +415,8 @@ def _check_mqtt_config(config: Any) -> None:
         where = f"subscribe entry {number}"
         _mqtt_text(entry, "topic", where)
         _mqtt_text(entry, "target", where)
-        # Without an action the firmware crashes when the entry is removed. A number is what the ACTION targets take,
-        # and what the device returns for a string of digits
+        # The firmware needs an action to remove the entry. A number is what the ACTION targets take, and what the
+        # device returns for a string of digits
         if (
             "action" not in entry
             or isinstance(entry["action"], bool)
@@ -978,17 +1062,59 @@ class ESP500Device(NETIODevice):
         schedule_id = self.get_schedule_id(schedule_name)
         self.set_output_schedule(output_id, schedule_id, enabled)
 
-    def _create_configurable_block(self, enable: bool, name: str, config: dict[str, Any], topic: str) -> None:
-        ws_type = "SET"
+    def _create_block(
+        self,
+        kind: str,
+        topic: str,
+        data: dict[str, Any],
+        get: Callable[[str], Any],
+        listed: Callable[[], list[dict[str, Any]]],
+    ) -> None:
+        """
+        Sends the create of a rule, PAB, watchdog or schedule once none of its name exists, and returns when the device
+        lists the new one and gives it by name: 5.4.0 answers before either. The first read waits BLOCK_CREATE_SETTLE.
+        """
+        name: str = data["name"]
+        try:
+            get(name)
+        except ElementNotFound:
+            pass
+        else:
+            raise ElementAlreadyExists(f"{kind[0].upper()}{kind[1:]} {name} already exists on device {self.host}")
+        self.logger.debug(f"Creating {kind} {name} via {topic} on device {self.host}")
+        _ = ws_api.send_request(self, "SET", topic, data)
+        sent = perf_counter()
+        sleep(BLOCK_CREATE_SETTLE)
+        while True:
+            if any(item["name"] == name for item in listed()):
+                try:
+                    get(name)
+                    return
+                except ElementNotFound:
+                    pass
+            if perf_counter() - sent > BLOCK_LISTED_TIMEOUT:
+                raise CommunicationError(
+                    f"Device {self.host} answered the create of {kind} {name} but doesn't give it "
+                    f"{BLOCK_LISTED_TIMEOUT} s later"
+                )
+            sleep(BLOCK_LISTED_INTERVAL)
 
-        self.logger.debug(f"Creating '{name}' via {topic} on device {self.host}")
-        rule_data = {
-            "enabled": enable,
-            "name": name,
-            "config": json.dumps(config, ensure_ascii=False),
-        }
-
-        ws_api.send_request(self, ws_type, topic, rule_data)
+    def _create_configurable_block(
+        self,
+        kind: str,
+        topic: str,
+        enable: bool,
+        name: str,
+        config: dict[str, Any],
+        get: Callable[[str], Any],
+        listed: Callable[[], list[dict[str, Any]]],
+    ) -> None:
+        """Creates a rule, PAB or watchdog after checking what the firmware would store as sent."""
+        _check_enabled(enable)
+        _check_block_name(name, kind)
+        text = _block_config_text(config, kind)
+        self.logger.debug(f"{kind} {name} configuration: {text}")
+        self._create_block(kind, topic, {"enabled": enable, "name": name, "config": text}, get, listed)
 
     def _get_configurable_block(self, ws_topic: str, kind: str, name: str) -> dict[str, Any]:
         """A rule, PAB or watchdog with its config parsed. The device sends it as a JSON string."""
@@ -1003,32 +1129,24 @@ class ESP500Device(NETIODevice):
         self, ws_topic: str, kind: str, name: str, enabled: bool | None, config: dict[str, Any] | None
     ) -> None:
         """Changes an existing rule, PAB or watchdog through its config topic. The device refuses another name."""
-        if enabled is not None and not isinstance(enabled, bool):
-            raise InvalidParameterValueError(f"enabled has to be a bool, not {enabled!r}")
-        if config is not None and not isinstance(config, dict):
-            raise InvalidParameterValueError(f"The config has to be a dict, not {config!r}")
+        if enabled is not None:
+            _check_enabled(enabled)
+        text = _block_config_text(config, kind) if config is not None else None
         current = self._get_configurable_block(ws_topic, kind, name)
         ws_type = "SET"
         ws_data = {
             "name": name,
             "enabled": _value_or_current(enabled, current, "enabled"),
-            "config": json.dumps(_value_or_current(config, current, "config"), ensure_ascii=False),
+            "config": text if text is not None else json.dumps(current["config"], ensure_ascii=False),
         }
         self.logger.debug(f"Setting {kind} {name} on device {self.host}")
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
 
     @override
     def create_rule(self, enable: bool, name: str, config: dict[str, Any]) -> None:
-        topic = "/rules/create"
-        try:
-            self.get_rule_by_name(name)
-        except ElementNotFound:
-            pass
-        else:
-            raise ElementAlreadyExists(f"Rule {name} already exists on device {self.host}")
-        self.logger.debug(f"Attempting to create rule {name} on device {self.host}.")
-        self.logger.debug(f"Rule configuration: {json.dumps(config, ensure_ascii=False)}")
-        self._create_configurable_block(enable, name, config, topic)
+        self._create_configurable_block(
+            "rule", "/rules/create", enable, name, config, self.get_rule_by_name, self.get_rules
+        )
 
     @override
     def get_rules(self) -> list[dict[str, Any]]:
@@ -1036,7 +1154,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "rules/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        return response.get("data", {}).get("items", [])
+        return response["data"]["items"]
 
     @override
     def get_rule_by_name(self, rule_name: str) -> dict[str, Any]:
@@ -1053,26 +1171,17 @@ class ESP500Device(NETIODevice):
     def get_enabled_rules(self) -> list[dict[str, Any]]:
         rules = self.get_rules()
         self.logger.debug(f"Filtering for enabled rules from device {self.host}")
-        return [rule for rule in rules if rule.get("enabled") is True]
+        return [rule for rule in rules if rule["enabled"] is True]
 
     @override
     def get_disabled_rules(self) -> list[dict[str, Any]]:
         rules = self.get_rules()
         self.logger.debug(f"Filtering for disabled rules from device {self.host}")
-        return [rule for rule in rules if rule.get("enabled") is False]
+        return [rule for rule in rules if rule["enabled"] is False]
 
     @override
     def create_pab(self, enable: bool, name: str, config: dict[str, Any]) -> None:
-        topic = "/pab/create"
-        try:
-            self.get_pab_by_name(name)
-        except ElementNotFound:
-            pass
-        else:
-            raise ElementAlreadyExists(f"PAB {name} already exists on device {self.host}")
-        self.logger.debug(f"Attempting to create PAB {name} on device {self.host}.")
-        self.logger.debug(f"PAB configuration: {json.dumps(config, ensure_ascii=False)}")
-        self._create_configurable_block(enable, name, config, topic)
+        self._create_configurable_block("PAB", "/pab/create", enable, name, config, self.get_pab_by_name, self.get_pabs)
 
     @override
     def get_pabs(self) -> list[dict[str, Any]]:
@@ -1080,7 +1189,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "pab/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        return response.get("data", {}).get("items", [])
+        return response["data"]["items"]
 
     @override
     def get_pab_by_name(self, pab_name: str) -> dict[str, Any]:
@@ -1097,26 +1206,19 @@ class ESP500Device(NETIODevice):
     def get_enabled_pabs(self) -> list[dict[str, Any]]:
         pabs = self.get_pabs()
         self.logger.debug(f"Filtering for enabled PABs from device {self.host}")
-        return [pab for pab in pabs if pab.get("enabled") is True]
+        return [pab for pab in pabs if pab["enabled"] is True]
 
     @override
     def get_disabled_pabs(self) -> list[dict[str, Any]]:
         pabs = self.get_pabs()
         self.logger.debug(f"Filtering for disabled PABs from device {self.host}")
-        return [pab for pab in pabs if pab.get("enabled") is False]
+        return [pab for pab in pabs if pab["enabled"] is False]
 
     @override
     def create_watchdog(self, enable: bool, name: str, config: dict[str, Any]) -> None:
-        topic = "/wdtpingers/create"
-        try:
-            self.get_watchdog_by_name(name)
-        except ElementNotFound:
-            pass
-        else:
-            raise ElementAlreadyExists(f"Watchdog {name} already exists on device {self.host}")
-        self.logger.debug(f"Attempting to create watchdog {name} on device {self.host}.")
-        self.logger.debug(f"Watchdog configuration: {json.dumps(config, ensure_ascii=False)}")
-        self._create_configurable_block(enable, name, config, topic)
+        self._create_configurable_block(
+            "watchdog", "/wdtpingers/create", enable, name, config, self.get_watchdog_by_name, self.get_watchdogs
+        )
 
     @override
     def get_watchdogs(self) -> list[dict[str, Any]]:
@@ -1124,7 +1226,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "wdtpingers/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        return response.get("data", {}).get("items", [])
+        return response["data"]["items"]
 
     @override
     def get_watchdog_by_name(self, watchdog_name: str) -> dict[str, Any]:
@@ -1150,37 +1252,32 @@ class ESP500Device(NETIODevice):
     def get_enabled_watchdogs(self) -> list[dict[str, Any]]:
         watchdogs = self.get_watchdogs()
         self.logger.debug(f"Filtering for enabled watchdogs from device {self.host}")
-        return [w for w in watchdogs if w.get("enabled") is True]
+        return [w for w in watchdogs if w["enabled"] is True]
 
     @override
     def get_disabled_watchdogs(self) -> list[dict[str, Any]]:
         watchdogs = self.get_watchdogs()
         self.logger.debug(f"Filtering for disabled watchdogs from device {self.host}")
-        return [w for w in watchdogs if w.get("enabled") is False]
+        return [w for w in watchdogs if w["enabled"] is False]
 
+    @override
     def create_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
-        topic = "/schedules/create"
-        ws_type = "SET"
-        ws_data = {
-            "name": name,
-            "intervals": intervals,
-        }
-        try:
-            self.get_schedule_by_name(name)
-        except ElementNotFound:
-            pass
-        else:
-            raise ElementAlreadyExists(f"Schedule {name} already exists on device {self.host}")
-        self.logger.debug(f"Attempting to create schedule {name} on device {self.host}.")
-        self.logger.debug(f"Schedule configuration: {intervals}")
-        ws_api.send_request(self, ws_type, topic, ws_data)
+        _check_block_name(name, "schedule")
+        _check_intervals(intervals)
+        self.logger.debug(f"schedule {name} intervals: {intervals}")
+        self._create_block(
+            "schedule",
+            "/schedules/create",
+            {"name": name, "intervals": intervals},
+            self.get_schedule_by_name,
+            self.get_schedules,
+        )
 
     @override
     def set_schedule(self, name: str, intervals: list[dict[str, Any]]) -> None:
         ws_topic = f"schedules/name/{name}/config"
         ws_type = "SET"
-        if not isinstance(intervals, list) or not all(isinstance(interval, dict) for interval in intervals):
-            raise InvalidParameterValueError(f"The intervals have to be a list of dicts, not {intervals!r}")
+        _check_intervals(intervals)
         ws_data = {"name": name, "intervals": intervals}
         self.get_schedule_by_name(name)
         self.logger.debug(f"Setting the intervals of schedule {name} on device {self.host}")
@@ -1192,7 +1289,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = "schedules/list"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        return response.get("data", {}).get("items", [])
+        return response["data"]["items"]
 
     @override
     def get_schedule_by_name(self, schedule_name: str) -> dict[str, Any]:
@@ -1200,7 +1297,7 @@ class ESP500Device(NETIODevice):
         ws_type = "SUBSCRIBE"
         ws_topic = f"schedules/name/{schedule_name}/config"
         response = ws_api.send_request(self, ws_type, ws_topic)
-        data = response.get("data")
+        data = response["data"]
         if not data:
             raise ElementNotFound(f"Schedule {schedule_name} not found on device {self.host}")
         return data
@@ -1210,7 +1307,7 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Fetching ID of schedule {schedule_name} from device {self.host}")
         schedules = self.get_schedules()
         for schedule in schedules:
-            if schedule.get("name") == schedule_name:
+            if schedule["name"] == schedule_name:
                 return int(schedule["id"])
         raise ElementNotFound(f"Schedule {schedule_name} not found on device {self.host}")
 
@@ -1218,7 +1315,7 @@ class ESP500Device(NETIODevice):
     def get_schedule_names(self) -> list[str]:
         schedules = self.get_schedules()
         self.logger.debug(f"Filtering for schedule names on device {self.host}")
-        return [schedule["name"] for schedule in schedules if "name" in schedule]
+        return [schedule["name"] for schedule in schedules]
 
     @override
     def get_active_schedules(self) -> list[dict[str, Any]]:
@@ -1232,8 +1329,8 @@ class ESP500Device(NETIODevice):
         schedules = self.get_schedules()
         schedule_name = None
         for schedule in schedules:
-            if schedule.get("id") == schedule_id:
-                schedule_name = schedule.get("name")
+            if schedule["id"] == schedule_id:
+                schedule_name = schedule["name"]
                 break
 
         if not schedule_name:
@@ -1737,7 +1834,7 @@ class ESP500Device(NETIODevice):
             "enable": _value_or_current(state, current, "enable"),
             "config": config_text if config_text is not None else current["config"],
         }
-        # Sent once: a config the device aborts on would restart it again with every repeat
+        # Sent once: a config the device can't handle would restart it again with every repeat
         _ = ws_api.send_request(self, ws_type, ws_topic, ws_data, resend=False)
         sleep(1)
         if config is not None:
@@ -1854,7 +1951,7 @@ class ESP500Device(NETIODevice):
             self._ka_thread.cancel()
             self._ka_thread.join()
         self.logger.debug(f"Importing configuration to device {self.host}")
-        # UTF-8, not \u escapes: an escape followed by about 150 characters crashes the device (F52)
+        # UTF-8, not \u escapes, which the firmware doesn't handle when about 150 characters follow
         encoded_data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         upload_path = ws_api.send_request(self, ws_type, ws_topic, ws_data)["data"]["uploadPath"]
         requested = perf_counter()
@@ -2335,7 +2432,8 @@ class ESP500Device(NETIODevice):
                         seen_not_installed is not None and uptime < perf_counter() - seen_not_installed - 1
                     ) or uptime >= LOAD_DEFAULTS_SETTLE_UPTIME:
                         self.user_permissions = self.get_user_privileges(DEFAULT_USERNAME)
-                        # The device can come back with its old configuration, when the request crashed it
+                        # The device can come back with its old configuration, when it restarted before loading the
+                        # defaults
                         users = self.get_users()
                         if set(users) != {DEFAULT_USERNAME}:
                             raise CommunicationError(

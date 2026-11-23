@@ -26,8 +26,17 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `get_mqttflex_state()` returns `config` as a dict instead of a JSON string, on 5.x firmware. This breaks code that
   parsed the string.
 - `set_mqttflex_state()` raises `InvalidParameterValueError` before sending a config the firmware doesn't apply or
-  crashes on, and `DeviceError` with the code `ConfigNotApplied` when the device doesn't store the config or stores it
+  handle, and `DeviceError` with the code `ConfigNotApplied` when the device doesn't store the config or stores it
   and doesn't apply it, on 5.x firmware. It sent any config and returned.
+- `create_rule()`, `create_pab()`, `create_watchdog()` and `create_schedule()` raise `InvalidParameterValueError`
+  before sending anything for an `enable` that isn't a bool, a name that isn't 1 to 15 characters or holds a `/`, a
+  config that isn't a dict, lacks a key the firmware needs or is over 1024 bytes as JSON, an interval without
+  `from` (0 to 86399), `to` (0 to 86400) or a bool for each day, and an empty interval list, which the firmware up to
+  5.4.0 doesn't handle, on 5.x firmware. `set_rule()`, `set_pab()`, `set_watchdog()` and `set_schedule()` check the
+  config and the intervals the same way. They sent any value as given. This breaks code that passes, for example, `1`
+  as `enable`.
+- The same creates return once the device lists the new element and gives it by name, at least 1 s after the device's
+  answer, and raise `CommunicationError` when it doesn't within 5 s. Firmware 5.4.0 answers a create before either.
 
 ### Added
 
@@ -95,6 +104,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Fixed
 
+- `get_rules()`, `get_pabs()`, `get_watchdogs()`, `get_schedules()`, their enabled and disabled lists,
+  `get_schedule_id()`, `get_schedule_names()` and `delete_schedule()` raise on a reply without its items, names or
+  ids instead of returning an empty list or nothing.
 - `get_input_data()` raises `InvalidSocketIndex` for input numbers below 1. It returned the last input for 0 and
   negative numbers.
 - `update_firmware()` works on firmware 5.1.x. It used the deprecated `/api` and failed before uploading.
@@ -113,7 +125,7 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - Uploads on 5.2.x and newer pause 0.1 s between chunks instead of 0.3 s.
 - Text outside ASCII is sent as UTF-8 everywhere. The configs of rules, PABs, watchdogs and MQTT-flex, the
   configuration import on 5.1.x and the JSON API of firmware before 5.0.0 sent it as `\u` escapes, which the firmware
-  cuts off, and which crash it when about 150 more characters follow.
+  cuts off, and doesn't handle when about 150 more characters follow.
 - `export_config(save_file)` writes the file as UTF-8. Where the system's default encoding is another, it raised
   `UnicodeEncodeError` for text outside that encoding.
 
