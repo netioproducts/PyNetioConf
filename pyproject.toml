@@ -31,7 +31,8 @@ dependencies = [
     "websocket-client>=1.9.2",
     "requests>=2.34.2",
     "urllib3>=2.8.0",
-    "typing-extensions>=4.4.0; python_version < '3.12'"
+    "typing-extensions>=4.4.0; python_version < '3.12'",
+    "websockets>=15",
 ]
 
 [project.urls]
