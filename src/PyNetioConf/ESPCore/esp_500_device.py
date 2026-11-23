@@ -46,6 +46,7 @@ from ..constants import (
     DEFAULT_PASSWORD,
     DEFAULT_REQUEST_QUEUE_LEN,
     DEFAULT_USERNAME,
+    EVENT_QUEUE_LEN,
     FIRMWARE_LIST_CACHE_TIME,
     FIRMWARE_LIST_INTERVAL,
     FIRMWARE_LIST_SETTLE,
@@ -558,6 +559,9 @@ class ESP500Device(NETIODevice):
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
         self._ws_lock = threading.RLock()
+        self._event_queue = deque(maxlen=EVENT_QUEUE_LEN)
+        self._events_dropped = 0
+        self._event_condition = threading.Condition()
         self._latency = LatencyStats()
         self._on_wifi = False
         self._delay_factor = 1.0
@@ -567,6 +571,7 @@ class ESP500Device(NETIODevice):
 
         # Init from base ESP Device
         self.ws: Connection | None = kwargs.get("ws_connection", None)
+        ws_api.attach_events(self)
         self.logger = logging.getLogger(__name__)
         self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):
@@ -651,6 +656,7 @@ class ESP500Device(NETIODevice):
                 self.logger.debug(f"{self.host} websocket connection attempt {attempt + 1}/{try_count}")
                 try:
                     self.ws = connect_device(self.host, self.use_https, self.ssl_options)
+                    ws_api.attach_events(self)
                 except Exception:
                     self.logger.debug(f"Connection to {self.host} failed on {attempt + 1}/{try_count}")
                     sleep(1)

@@ -21,6 +21,7 @@ from .. import NetioManager
 from ..constants import (
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_REQUEST_QUEUE_LEN,
+    EVENT_QUEUE_LEN,
     NBUS_DISCOVER_INTERVAL,
     NBUS_DISCOVER_SAVE,
     NBUS_DISCOVER_SEARCH,
@@ -153,6 +154,9 @@ class ESP540Device(ESP520Device):
         self._request_queue = deque(maxlen=DEFAULT_REQUEST_QUEUE_LEN)
         self._pong_queue = deque(maxlen=DEFAULT_KEEP_ALIVE_QUEUE_LEN)
         self._ws_lock = threading.RLock()
+        self._event_queue = deque(maxlen=EVENT_QUEUE_LEN)
+        self._events_dropped = 0
+        self._event_condition = threading.Condition()
         self._latency = LatencyStats()
         self._on_wifi = False
         self._delay_factor = 1.0
@@ -166,6 +170,7 @@ class ESP540Device(ESP520Device):
 
         # Init from base ESP Device
         self.ws: Connection | None = kwargs.get("ws_connection", None)
+        ws_api.attach_events(self)
         self.logger = logging.getLogger(__name__)
         self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):

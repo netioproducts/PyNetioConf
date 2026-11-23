@@ -111,6 +111,7 @@ NBUS_DISCOVER_SAVE = 1  # Time for the device to save the line once the devices 
 # WebSocket 5.0.0+ communication constants
 DEFAULT_REQUEST_QUEUE_LEN = 256  # Amount of normal request to keep for lookback
 DEFAULT_KEEP_ALIVE_QUEUE_LEN = 64  # Same for keep-alive
+EVENT_QUEUE_LEN = 1024  # Events kept per device, the oldest dropped first
 
 
 class OutputAction(StrEnum):

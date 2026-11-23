@@ -1,15 +1,17 @@
 """
 The WebSocket connection to a device: the asyncio client of `websockets` behind blocking calls. Every connection of the
-process runs on one event loop, in a daemon thread that starts with the first connection.
+process runs on one event loop, in a daemon thread that starts with the first connection. A reader on that loop takes
+every message of a connection as it comes, so nothing waits in the socket while no request is made.
 """
 
 import asyncio
 import logging
 import os
+import queue
 import ssl
 import threading
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
 from websockets.asyncio.client import ClientConnection, connect
@@ -27,6 +29,18 @@ _T = TypeVar("_T")
 
 OPEN_TIMEOUT = 10  # Seconds a connection may take to open
 CLOSE_TIMEOUT = 3  # Seconds a close waits for the device's close frame
+
+
+# Takes a message and its time.monotonic() of arrival on the event loop's thread, and returns whether it kept the
+# message; one it didn't keep goes to recv(). It has to be quick and safe to call from that thread.
+Sorter = Callable[[str | bytes, float], bool]
+
+
+class _Closed:
+    """In a connection's inbox: the reader ended, with what ended it."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
 
 
 class WebSocketError(Exception):
@@ -138,18 +152,19 @@ class Connection:
         self.url = url
         self._timeout = timeout
         self._loop = _event_loop()
-        # One recv() at a time: a second thread waits for its turn, as it would on a blocking socket
-        self._recv_lock = threading.Lock()
+        # What the reader took and no sorter kept, for recv(); a _Closed once the reader has ended
+        self._inbox: queue.SimpleQueue[str | bytes | _Closed] = queue.SimpleQueue()
+        self._sorter: Sorter | None = None
+        self._reader: asyncio.Task[None] | None = None
         try:
             self._ws: ClientConnection = self._run(self._open(url, ssl_context))
         except (OSError, WebSocketException) as error:
             raise WebSocketError(f"Couldn't open {url}: {error!r}") from error
 
-    @staticmethod
-    async def _open(url: str, ssl_context: ssl.SSLContext | None) -> ClientConnection:
+    async def _open(self, url: str, ssl_context: ssl.SSLContext | None) -> ClientConnection:
         # Compression isn't negotiated by the devices. The devices' sessions are kept alive by PyNetioConf's own PING
         # requests, and their replies have no size limit.
-        return await connect(
+        ws = await connect(
             url,
             ssl=ssl_context,
             compression=None,
@@ -159,6 +174,31 @@ class Connection:
             close_timeout=CLOSE_TIMEOUT,
             logger=frame_logger,
         )
+        self._reader = asyncio.create_task(self._read(ws))
+        return ws
+
+    async def _read(self, ws: ClientConnection) -> None:
+        """Takes every message as it comes: to the sorter, and to the inbox when there is none or it doesn't keep it."""
+        reason = "closed"
+        try:
+            async for message in ws:
+                received = time.monotonic()
+                sorter = self._sorter
+                try:
+                    kept = sorter is not None and sorter(message, received)
+                except Exception:
+                    logger.exception(f"Sorting a message from {self.url} failed, it goes to the next recv()")
+                    kept = False
+                if not kept:
+                    self._inbox.put(message)
+        except ConnectionClosed as error:
+            reason = repr(error)
+        finally:
+            self._inbox.put(_Closed(reason))
+
+    def set_sorter(self, sorter: Sorter | None) -> None:
+        """Sets what the reader offers every message to before recv() gets it; None for nothing."""
+        self._sorter = sorter
 
     def _run(self, coroutine: Coroutine[Any, Any, _T]) -> _T:
         """Runs a coroutine on the event loop and returns its result."""
@@ -194,8 +234,9 @@ class Connection:
 
     def recv(self, deadline: float | None = None) -> str | bytes:
         """
-        Waits for the next message and returns it, text as str: for the connection's timeout, or until deadline, a
-        time.monotonic() value, when one is given.
+        Waits for the next message the sorter didn't keep and returns it, text as str: for the connection's timeout, or
+        until deadline, a time.monotonic() value, when one is given. Two threads waiting each get a message of their
+        own.
 
         Raises
         ------
@@ -205,17 +246,15 @@ class Connection:
             The connection is closed.
         """
         timeout = self._timeout if deadline is None else max(deadline - time.monotonic(), 0.0)
-        with self._recv_lock:
-            try:
-                return self._run(self._recv(timeout))
-            except TimeoutError as error:
-                raise WebSocketTimeoutError(f"No message from {self.url} in {timeout} s") from error
-            except (ConnectionClosed, OSError) as error:
-                raise WebSocketClosedError(f"The connection to {self.url} is closed: {error!r}") from error
-
-    async def _recv(self, timeout: float | None) -> str | bytes:
-        async with asyncio.timeout(timeout):
-            return await self._ws.recv()
+        try:
+            message = self._inbox.get(timeout=timeout)
+        except queue.Empty as error:
+            raise WebSocketTimeoutError(f"No message from {self.url} in {timeout} s") from error
+        if isinstance(message, _Closed):
+            # Stays in the inbox for every later recv()
+            self._inbox.put(message)
+            raise WebSocketClosedError(f"The connection to {self.url} is closed: {message.reason}")
+        return message
 
     def close(self) -> None:
         """Closes the connection with a close frame and waits up to CLOSE_TIMEOUT seconds for the device's."""

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from xml.etree.ElementTree import Element
 
 from .constants import (
+    EVENT_QUEUE_LEN,
     NBUS_DISCOVER_TIMEOUT,
     NbusRole,
     NetworkMode,
@@ -43,6 +44,7 @@ from .groups import (
 from .latency import LatencyStats
 
 if TYPE_CHECKING:
+    from .ESPCore.ws_api import Event
     from .ESPCore.ws_transport import Connection
     from .NetioManager import NetioManager
 
@@ -93,6 +95,11 @@ class NETIODevice(ABC):
         self._pong_queue: deque[dict[str, Any]] = deque()
         # Held for a whole request on the WebSocket connection, by whichever thread makes it
         self._ws_lock = threading.RLock()
+        # What the device sent unasked, the newest last; _event_condition guards it and is notified
+        # with every event
+        self._event_queue: deque[Event] = deque(maxlen=EVENT_QUEUE_LEN)
+        self._events_dropped = 0
+        self._event_condition = threading.Condition()
         self._latency = LatencyStats()
         # Whether the device reaches the network over Wi-Fi, which lengthens the request delay
         self._on_wifi = False

@@ -5,9 +5,10 @@ import logging
 import math
 import random
 from collections.abc import Generator
+from functools import partial
 from io import BufferedIOBase
-from time import monotonic, perf_counter, sleep
-from typing import Any, NamedTuple
+from time import monotonic, perf_counter, sleep, time
+from typing import Any, NamedTuple, cast
 
 from PyNetioConf.constants import (
     HTTPS_DELAY_FACTOR,
@@ -43,11 +44,48 @@ def _check_reply(reply: dict[str, Any], host: str, ws_type: str, topic: str | No
     raise DeviceError(host, ws_type, topic, code, message)
 
 
+class Event(NamedTuple):
+    """What a device sent unasked about a topic it was subscribed to: the topic's data as it then was."""
+
+    topic: str | None
+    data: Any
+    received: float  # time.monotonic() when it came
+    time: float  # time.time() when it came
+
+
+def _store_event(device: NETIODevice, message: dict[str, Any], received: float) -> None:
+    """Adds an EVENT to the device's event queue, which drops its oldest when full, and wakes who waits for one."""
+    event = Event(message.get("topic"), message.get("data"), received, time() - (monotonic() - received))
+    with device._event_condition:
+        if len(device._event_queue) == device._event_queue.maxlen:
+            device._events_dropped += 1
+        device._event_queue.append(event)
+        device._event_condition.notify_all()
+
+
+def _sort_message(device: NETIODevice, message: str | bytes, received: float) -> bool:
+    """The connection's sorter: keeps an EVENT for the device's event queue, leaves everything else to the requests."""
+    try:
+        parsed = json.loads(message)
+    except ValueError:
+        return False
+    if not isinstance(parsed, dict) or parsed.get("type") != "EVENT":
+        return False
+    _store_event(device, cast(dict[str, Any], parsed), received)
+    return True
+
+
+def attach_events(device: NETIODevice) -> None:
+    """Has the device's connection hand its events to the device's event queue as they come."""
+    if device.ws is not None:
+        device.ws.set_sorter(partial(_sort_message, device))
+
+
 def _receive(ws: Connection, req_id: int, host: str, device: NETIODevice | None = None) -> dict[str, Any]:
     """
-    Reads the connection until the reply to request req_id comes, and returns it. An EVENT that comes meanwhile is
-    dropped. Another request's reply, such as a late one or an UNSUBSCRIBE's, is passed over and kept in the device's
-    queues.
+    Reads the connection until the reply to request req_id comes, and returns it. Another request's reply, such as a
+    late one or an UNSUBSCRIBE's, is passed over and kept in the device's queues. An EVENT the connection's reader
+    didn't take, which is one that came before attach_events(), goes to the device's event queue here.
 
     Raises
     ------
@@ -63,7 +101,8 @@ def _receive(ws: Connection, req_id: int, host: str, device: NETIODevice | None 
         logger.debug(f"Received response from {host} with payload {message}")
         reply: dict[str, Any] = json.loads(message)
         if reply.get("type") == "EVENT":
-            logger.debug(f"Ignored event from {host}")
+            if device is not None:
+                _store_event(device, reply, monotonic())
             continue
         if device is not None:
             (device._pong_queue if reply.get("type") == "PONG" else device._request_queue).append(reply)
