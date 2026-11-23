@@ -16,6 +16,11 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.protocol import State
 
 logger = logging.getLogger(__name__)
+# What websockets logs about a connection, a DEBUG line for every frame and the handshake. Off unless this logger is set
+# to DEBUG: PyNetioConf logs every request and reply itself
+frame_logger = logging.getLogger(f"{__name__}.frames")
+if frame_logger.level == logging.NOTSET:
+    frame_logger.setLevel(logging.INFO)
 
 _T = TypeVar("_T")
 
@@ -61,6 +66,48 @@ def _event_loop() -> asyncio.AbstractEventLoop:
             _loop_thread.start()
             logger.debug("Started the event loop for WebSocket connections")
         return _loop
+
+
+def ssl_context_of(ssl_options: dict[str, Any]) -> ssl.SSLContext:
+    """
+    The TLS settings of a wss:// connection from a device's ssl_options: its "context" when it has one, else a context
+    built from the keys cert_reqs, check_hostname, ca_certs, ca_cert_path, certfile, keyfile, password, ciphers and
+    ecdh_curve. Without any of them the certificate and the host name are verified.
+    """
+    context = ssl_options.get("context")
+    if isinstance(context, ssl.SSLContext):
+        return context
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    cert_reqs: ssl.VerifyMode = ssl_options.get("cert_reqs", ssl.CERT_REQUIRED)
+    # The host name can only be checked while the certificate is, and has to be switched off first
+    context.check_hostname = cert_reqs != ssl.CERT_NONE and bool(ssl_options.get("check_hostname", True))
+    context.verify_mode = cert_reqs
+    if ssl_options.get("ca_certs") or ssl_options.get("ca_cert_path"):
+        context.load_verify_locations(cafile=ssl_options.get("ca_certs"), capath=ssl_options.get("ca_cert_path"))
+    elif cert_reqs != ssl.CERT_NONE:
+        context.load_default_certs()
+    if ssl_options.get("certfile"):
+        context.load_cert_chain(ssl_options["certfile"], ssl_options.get("keyfile"), ssl_options.get("password"))
+    if ssl_options.get("ciphers"):
+        context.set_ciphers(ssl_options["ciphers"])
+    if ssl_options.get("ecdh_curve"):
+        context.set_ecdh_curve(ssl_options["ecdh_curve"])
+    return context
+
+
+def connect_device(host: str, use_https: bool, ssl_options: dict[str, Any] | None = None) -> "Connection":
+    """
+    Opens the WebSocket connection to a device, wss://<host>/emweb with the TLS settings of ssl_options or
+    ws://<host>/emweb. Its recv() waits OPEN_TIMEOUT seconds until settimeout() says otherwise.
+
+    Raises
+    ------
+    WebSocketError
+        The connection couldn't be opened.
+    """
+    if use_https:
+        return Connection(f"wss://{host}/emweb", ssl_context_of(ssl_options or {}), timeout=OPEN_TIMEOUT)
+    return Connection(f"ws://{host}/emweb", timeout=OPEN_TIMEOUT)
 
 
 class Connection:
@@ -109,6 +156,7 @@ class Connection:
             max_size=None,
             open_timeout=OPEN_TIMEOUT,
             close_timeout=CLOSE_TIMEOUT,
+            logger=frame_logger,
         )
 
     def _run(self, coroutine: Coroutine[Any, Any, _T]) -> _T:

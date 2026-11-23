@@ -9,6 +9,11 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Changed
 
+- The WebSocket connection to 5.x devices is made with `websockets` instead of `websocket-client`, which is no longer
+  a dependency. The methods, their arguments and the `ssl_*` arguments of `init_device()` are unchanged. `device.ws`
+  and the `ws_connection` argument of the 5.x device classes are now a `PyNetioConf.ESPCore.ws_transport.Connection`,
+  which breaks code that passes or uses a `websocket.WebSocket` there. The frame-level debug lines of `websockets` are off; set the logger
+  `PyNetioConf.ESPCore.ws_transport.frames` to `DEBUG` to see them.
 - On 5.x firmware the pause after each request is 30 ms instead of 35 ms, and it and the 0.1 s pause between upload
   chunks grow on Wi-Fi (×1.5), over HTTPS (×1.75) and with a slow device (×1.15 above 75 ms, ×1.15 more above 250 ms).
   Connecting reads the Ethernet and Wi-Fi status, two more requests.

@@ -28,14 +28,13 @@ else:
 import logging
 import threading
 
-from websocket import WebSocket
-
 from .. import NetioManager
 from ..exceptions import CommunicationError, DeviceError, ElementNotFound
 from ..latency import LatencyStats
 from ..netio_device import NETIODevice
 from . import ws_api
 from .esp_500_device import ESP500Device, _check_pem, _load_config_file
+from .ws_transport import Connection
 
 
 class ESP520Device(ESP500Device):
@@ -105,7 +104,7 @@ class ESP520Device(ESP500Device):
             Connection state handed over by NetioManager. None of these are required when creating the object by
             hand, but without them the init opens and authenticates a new connection itself.
 
-            ws_connection : websocket.WebSocket | None
+            ws_connection : ws_transport.Connection | None
                 An open WebSocket connection to the device. If None, a new connection is opened on login.
                 Default None.
             is_ws_auth : bool
@@ -121,7 +120,8 @@ class ESP520Device(ESP500Device):
                 Firmware version of the device as (major, minor, patch). Also selects the API dialect: on 5.2.x and
                 newer, requests use GET instead of SUBSCRIBE. Default (5, 2, 0).
             ssl_options : dict[str, Any]
-                SSL options passed to websocket-client as sslopt whenever the connection is (re)opened over wss://.
+                The TLS settings whenever the connection is (re)opened over wss://: "context", an ssl.SSLContext,
+                or without it the keys ws_transport.ssl_context_of() takes.
                 NetioManager builds this from the ssl_* keyword arguments of init_device. Default {}.
         """
         self.host = host
@@ -153,7 +153,7 @@ class ESP520Device(ESP500Device):
         self._firmware_list_time = 0.0
 
         # Init from base ESP Device
-        self.ws: WebSocket | None = kwargs.get("ws_connection", None)
+        self.ws: Connection | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
         self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):

@@ -4,12 +4,10 @@ import ssl
 from time import perf_counter, sleep
 from typing import TYPE_CHECKING, Any, Optional
 
-import websocket
-from websocket import WebSocket
-
 from ..exceptions import AuthError, InvalidParameterValueError
 from ..netio_device import NETIODevice
 from . import ws_api
+from .ws_transport import Connection, connect_device
 
 if TYPE_CHECKING:
     from ..NetioManager import NetioManager
@@ -122,7 +120,7 @@ def _setup_ssl(**kwargs: Any) -> tuple[ssl.SSLContext, dict[str, Any]]:
     return (_ssl_context, ssl_options)
 
 
-def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs: dict[str, Any]) -> WebSocket:
+def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs: dict[str, Any]) -> Connection:
     ssl_options: dict[str, Any] | None = None
     _ssl_context: ssl.SSLContext | None = None
     if use_https:
@@ -133,12 +131,9 @@ def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs:
         logger.debug(f"{host} websocket connection attempt {attempt + 1}/{try_count}")
         try:
             connection_dt_start = perf_counter()
-            if use_https:
-                ws = websocket.create_connection(f"wss://{host}/emweb", sslopt=ssl_options, timeout=10)
-            else:
-                ws = websocket.create_connection(f"ws://{host}/emweb", timeout=10)
+            ws = connect_device(host, use_https, ssl_options)
 
-            if isinstance(ws, WebSocket):
+            if isinstance(ws, Connection):
                 logger.debug(f"Succesfully connected to {host}")
                 break
             else:
@@ -151,7 +146,7 @@ def _try_connect_websocket(host: str, use_https: bool, try_count: int, **kwargs:
             sleep(1)
             continue
 
-    if isinstance(ws, WebSocket):
+    if isinstance(ws, Connection):
         logger.debug(f"Setting default timeout for {host}.")
         ws.settimeout(60)
     return ws
@@ -169,7 +164,7 @@ def initialize_esp(
     if netio_manager is None:
         raise InvalidParameterValueError
 
-    ws: websocket.WebSocket | None = None
+    ws: Connection | None = None
     version = 4  # TODO: Do version parsing here, not in NetioManager as this is ESP thing, not general NETIO thing
     minor = 0
     patch = 0

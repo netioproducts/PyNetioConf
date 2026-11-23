@@ -13,8 +13,6 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Optional
 from xml.etree.ElementTree import Element
 
-from websocket import WebSocket
-
 from .constants import (
     NBUS_DISCOVER_TIMEOUT,
     NbusRole,
@@ -45,6 +43,7 @@ from .groups import (
 from .latency import LatencyStats
 
 if TYPE_CHECKING:
+    from .ESPCore.ws_transport import Connection
     from .NetioManager import NetioManager
 
 
@@ -87,7 +86,7 @@ class NETIODevice(ABC):
         self.user_permissions: list[str] = list()
         self._keep_alive_flag = keep_alive
         self._ka_thread: threading.Timer | None = None
-        self.ws: WebSocket | None = None
+        self.ws: Connection | None = None
         self.ws_req_id = 0
         self.use_https = use_https
         self._request_queue: deque[dict[str, Any]] = deque()

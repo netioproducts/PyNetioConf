@@ -8,8 +8,6 @@ from collections import deque
 from time import sleep
 from typing import Dict, List, Tuple
 
-import websocket
-
 from PyNetioConf.constants import (
     DEFAULT_KEEP_ALIVE_QUEUE_LEN,
     DEFAULT_REQUEST_QUEUE_LEN,
@@ -19,6 +17,7 @@ from .. import NetioManager
 from ..exceptions import CommunicationError
 from . import esp_api, ws_api
 from .esp_400_device import ESP400Device
+from .ws_transport import Connection
 
 
 class ESP5BetaDevice(ESP400Device):
@@ -56,21 +55,17 @@ class ESP5BetaDevice(ESP400Device):
         self._ssl_context.check_hostname = False
         self._ssl_context.verify_mode = ssl.CERT_NONE
         if self.use_https:
-            self.ws = websocket.create_connection(
-                f"wss://{host}/emweb", sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
+            self.ws = Connection(f"wss://{host}/emweb", self._ssl_context)
         else:
-            self.ws = websocket.create_connection(f"ws://{host}/emweb")
+            self.ws = Connection(f"ws://{host}/emweb")
         self.ws_req_id = 0
         self._login_new(username, password)
 
     def _login_new(self, username: str, password: str, logout=False) -> str:
         if self.use_https:
-            self.ws = websocket.create_connection(
-                f"wss://{self.host}/emweb", sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
+            self.ws = Connection(f"wss://{self.host}/emweb", self._ssl_context)
         else:
-            self.ws = websocket.create_connection(f"ws://{self.host}/emweb")
+            self.ws = Connection(f"ws://{self.host}/emweb")
         self.ws_req_id = 0
         hello_response = ws_api.send_request(self, "HELO")
 

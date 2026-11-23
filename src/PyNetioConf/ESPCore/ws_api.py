@@ -9,8 +9,6 @@ from io import BufferedIOBase
 from time import perf_counter, sleep
 from typing import Any, NamedTuple
 
-from websocket import WebSocket, WebSocketConnectionClosedException, WebSocketTimeoutException
-
 from PyNetioConf.constants import (
     HTTPS_DELAY_FACTOR,
     LATENCY_DELAY_STEPS,
@@ -24,6 +22,7 @@ from PyNetioConf.constants import (
 
 from ..exceptions import AuthError, CommunicationError, DeviceError, UnauthorizedError
 from ..netio_device import NETIODevice
+from .ws_transport import Connection, WebSocketClosedError, WebSocketTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -212,11 +211,7 @@ def send_request(
             reply: dict[str, Any] = message_data if message_data else json.loads(message)
             _check_reply(reply, device.host, ws_type, ws_topic)
             return reply
-        except (
-            BrokenPipeError,
-            WebSocketConnectionClosedException,
-            ConnectionResetError,
-        ):
+        except WebSocketClosedError:
             # This most likely means that the device has rebooted, or just lost connection for other reasons.
             # Keep reconnecting for WS_RECONNECT_TIMEOUT seconds, then consider the connection lost.
             if reconnect_deadline is None:
@@ -239,7 +234,7 @@ def send_request(
         except (AuthError, DeviceError):
             # A refused login from reconnecting, or a request the device refused, is not a communication problem
             raise
-        except WebSocketTimeoutException as e:
+        except WebSocketTimeoutError as e:
             device._latency.record_timeout()
             raise CommunicationError(f"Failed to send request to {device.host}", str(e))
         except Exception as e:
@@ -274,14 +269,14 @@ def _reconnect(device: NETIODevice, deadline: float, last_attempt: float | None)
             logger.debug(f"Reconnecting to {device.host} failed, retrying.")
 
 
-def close_connection(ws: WebSocket | None, graceful: bool = True) -> None:
+def close_connection(ws: Connection | None, graceful: bool = True) -> None:
     """
     Closes a WebSocket connection to a device. The device keeps a session for every open connection and has room for
     only a few, so a connection that isn't needed any more has to be closed, not left to the garbage collector.
 
     Parameters
     ----------
-    ws : WebSocket | None
+    ws : Connection | None
         The connection to close. None does nothing.
     graceful : bool
         Send a close frame and wait for the device's reply. Otherwise the socket is shut down at once, which is meant
@@ -328,7 +323,7 @@ def _gen_file_chunks(file_obj: BufferedIOBase, chunk_size: int = 2048) -> Genera
 
 
 # What a chunk that gets no reply raises: a timeout, or a connection the device closed or reset
-_NO_REPLY = (WebSocketTimeoutException, WebSocketConnectionClosedException, ConnectionResetError, BrokenPipeError)
+_NO_REPLY = (WebSocketTimeoutError, WebSocketClosedError)
 
 
 def upload_file(
@@ -365,7 +360,7 @@ def upload_file(
                     last,
                 )
             except _NO_REPLY as e:
-                if isinstance(e, WebSocketTimeoutException) and not restarts:
+                if isinstance(e, WebSocketTimeoutError) and not restarts:
                     device._latency.record_timeout()
                 if restarts:
                     logger.debug(f"Device {device.host} didn't answer the last chunk ({type(e).__name__}), restarting")
@@ -498,7 +493,7 @@ def login(device: NETIODevice, timestamp: int, public_key: str, username: str, p
 
 
 def device_init_login(
-    ws: WebSocket,
+    ws: Connection,
     ws_req_id: int,
     timestamp: int,
     public_key: str,
@@ -527,7 +522,7 @@ def device_init_login(
 
 
 def device_init_request(
-    ws: WebSocket,
+    ws: Connection,
     ws_req_id: int,
     type: str,
     host: str,

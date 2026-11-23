@@ -33,8 +33,6 @@ import threading
 import warnings
 
 import requests
-import websocket
-from websocket import WebSocket
 
 from .. import NetioManager
 from ..constants import (
@@ -115,6 +113,7 @@ from ..exceptions import (
 from ..latency import LatencyStats
 from ..netio_device import NETIODevice
 from . import esp_api, ws_api
+from .ws_transport import Connection, connect_device
 
 
 def _value_or_current(value: Any, current: dict[str, Any], key: str) -> Any:
@@ -511,7 +510,7 @@ class ESP500Device(NETIODevice):
             Connection state handed over by NetioManager. None of these are required when creating the object by
             hand, but without them the init opens and authenticates a new connection itself.
 
-            ws_connection : websocket.WebSocket | None
+            ws_connection : ws_transport.Connection | None
                 An open WebSocket connection to the device. If None, a new connection is opened on login.
                 Default None.
             is_ws_auth : bool
@@ -527,7 +526,8 @@ class ESP500Device(NETIODevice):
                 Firmware version of the device as (major, minor, patch). Also selects the API dialect: on 5.4.x and
                 newer, requests use GET instead of SUBSCRIBE. Default (5, 1, 3).
             ssl_options : dict[str, Any]
-                SSL options passed to websocket-client as sslopt whenever the connection is (re)opened over wss://.
+                The TLS settings whenever the connection is (re)opened over wss://: "context", an ssl.SSLContext,
+                or without it the keys ws_transport.ssl_context_of() takes.
                 NetioManager builds this from the ssl_* keyword arguments of init_device. Default {}.
         """
         self.host = host
@@ -565,7 +565,7 @@ class ESP500Device(NETIODevice):
         self._firmware_list_time = 0.0
 
         # Init from base ESP Device
-        self.ws: WebSocket | None = kwargs.get("ws_connection", None)
+        self.ws: Connection | None = kwargs.get("ws_connection", None)
         self.logger = logging.getLogger(__name__)
         self.ssl_options: dict[str, Any] = kwargs.get("ssl_options") or {}
         if kwargs.get("is_ws_auth", False):
@@ -643,14 +643,7 @@ class ESP500Device(NETIODevice):
 
                 self.logger.debug(f"{self.host} websocket connection attempt {attempt + 1}/{try_count}")
                 try:
-                    if self.use_https:
-                        self.ws = websocket.create_connection(
-                            f"wss://{self.host}/emweb",
-                            sslopt=self.ssl_options,
-                            timeout=10,
-                        )
-                    else:
-                        self.ws = websocket.create_connection(f"ws://{self.host}/emweb", timeout=10)
+                    self.ws = connect_device(self.host, self.use_https, self.ssl_options)
                 except Exception:
                     self.logger.debug(f"Connection to {self.host} failed on {attempt + 1}/{try_count}")
                     sleep(1)
