@@ -107,6 +107,8 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 - `get_rules()`, `get_pabs()`, `get_watchdogs()`, `get_schedules()`, their enabled and disabled lists,
   `get_schedule_id()`, `get_schedule_names()` and `delete_schedule()` raise on a reply without its items, names or
   ids instead of returning an empty list or nothing.
+- `get_active_schedules()` returns the schedules with an interval that covers the device's local time on 5.x firmware,
+  from each schedule's intervals and the device's clock. It always returned an empty list there.
 - `get_input_data()` raises `InvalidSocketIndex` for input numbers below 1. It returned the last input for 0 and
   negative numbers.
 - `update_firmware()` works on firmware 5.1.x. It used the deprecated `/api` and failed before uploading.

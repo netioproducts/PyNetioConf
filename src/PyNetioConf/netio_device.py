@@ -2315,11 +2315,12 @@ class NETIODevice(ABC):
     @abstractmethod
     def get_active_schedules(self) -> list[dict[str, Any]]:
         """
-        Gets all the schedules that are currently active on the device.
+        Gets the schedules that are active now: those with an interval that covers the device's local time, whether or
+        not an output uses them.
 
         Returns
         -------
-            A list of all active schedules on the device in JSON format.
+            A list of all active schedules on the device in JSON format, as get_schedules() gives them.
         """
         pass
 

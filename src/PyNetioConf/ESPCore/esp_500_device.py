@@ -243,6 +243,13 @@ def _block_config_text(config: Any, kind: str) -> str:
     return text
 
 
+def _intervals_cover(intervals: list[dict[str, Any]], device_time: int) -> bool:
+    """Whether one of a schedule's intervals covers device_time, the device's local time as seconds since the epoch."""
+    second = device_time % 86400
+    day = SCHEDULE_DAYS[(device_time // 86400 + 3) % 7]  # 1970-01-01 was a Thursday
+    return any(interval[day] and interval["from"] <= second < interval["to"] for interval in intervals)
+
+
 def _check_intervals(intervals: Any) -> None:
     """
     Raises InvalidParameterValueError unless intervals is a non-empty list of dicts, each with a whole number of seconds
@@ -1321,7 +1328,15 @@ class ESP500Device(NETIODevice):
     def get_active_schedules(self) -> list[dict[str, Any]]:
         schedules = self.get_schedules()
         self.logger.debug(f"Filtering for active schedules on device {self.host}")
-        return [schedule for schedule in schedules if schedule.get("active") is True]
+        if all("active" in schedule for schedule in schedules):
+            return [schedule for schedule in schedules if schedule["active"] is True]
+        # The list has no "active" on firmware up to 5.4.0: work it out from the intervals and the device's clock
+        now = int(self.get_system_datetime()["time"])
+        return [
+            schedule
+            for schedule in schedules
+            if _intervals_cover(self.get_schedule_by_name(schedule["name"])["intervals"], now)
+        ]
 
     @override
     def delete_schedule(self, schedule_id: int) -> None:

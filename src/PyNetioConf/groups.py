@@ -1115,7 +1115,8 @@ class Schedules(_Group):
 
     def get_active(self) -> list[dict[str, Any]]:
         """
-        Gets all the schedules that are currently active on the device.
+        Gets the schedules that are active now: those with an interval that covers the device's local time, whether or
+        not an output uses them.
 
         Full documentation: `NETIODevice.get_active_schedules`.
         """
