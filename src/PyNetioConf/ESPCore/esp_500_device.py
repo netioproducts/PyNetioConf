@@ -10,9 +10,10 @@ import os
 import re
 import sys
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from enum import StrEnum
-from time import perf_counter, sleep
+from time import monotonic, perf_counter, sleep
 from xml.etree.ElementTree import Element
 
 from PyNetioConf.constants import (
@@ -49,6 +50,7 @@ from ..constants import (
     EVENT_QUEUE_LEN,
     FIRMWARE_LIST_CACHE_TIME,
     FIRMWARE_LIST_INTERVAL,
+    FIRMWARE_LIST_LOCK_TIMEOUT,
     FIRMWARE_LIST_SETTLE,
     FIRMWARE_LIST_TIMEOUT,
     LOAD_DEFAULTS_GRACE_PERIOD,
@@ -83,6 +85,7 @@ from ..constants import (
     SCHEDULE_DAYS,
     SCHEDULE_FROM_MAX,
     SCHEDULE_TO_MAX,
+    SYSTEM_LOCK_EVENT_WAIT,
     UPLOAD_RESTART_REPLY_TIMEOUT,
     USER_LIST_SYNC_INTERVAL,
     USER_LIST_SYNC_TIMEOUT,
@@ -2732,8 +2735,10 @@ class ESP500Device(NETIODevice):
         self.logger.debug(f"Checking for firmware updates on device {self.host}")
         before = self._get_firmware_list()
         sleep(FIRMWARE_LIST_INTERVAL)
-        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
-        items: list[dict[str, Any]] = self._wait_for_firmware_list(before)
+        with self._system_lock_events():
+            requested = monotonic()
+            _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+            items: list[dict[str, Any]] = self._wait_for_firmware_list(before, requested)
         # Without newer firmware the device lists one item, "No new firmware available", without version or links
         if all(not item["version"] and not item["downloadUrl"] and not item["downloadUrlNoMcu"] for item in items):
             items = []
@@ -2749,10 +2754,55 @@ class ESP500Device(NETIODevice):
         # 5.1.3 leaves out items while it rebuilds the list
         return data["items"] if "items" in data else []
 
-    def _wait_for_firmware_list(self, before: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    @contextmanager
+    def _system_lock_events(self) -> Iterator[None]:
         """
-        Waits until fwupdate/list holds the update server's answer to a getFirmwareList request and returns it. before
-        is the list from just before the request.
+        Holds a subscription to system/lock, whose events say when the device locks and unlocks it, for
+        _wait_for_system_lock(). Ends it afterwards unless it was held before.
+        """
+        topic = "system/lock"
+        held = topic in self._subscriptions
+        if not held:
+            _ = ws_api._raw_request(self, "SUBSCRIBE", topic)
+        try:
+            yield
+        finally:
+            # A connection replaced meanwhile took the subscription with it
+            if not held and topic in self._subscriptions:
+                try:
+                    _ = ws_api._raw_request(self, "UNSUBSCRIBE", topic)
+                except CommunicationError:
+                    self.logger.debug(f"Couldn't end the subscription to {topic} on device {self.host}")
+
+    def _wait_for_system_lock(self, op: str, since: float, timeout: float) -> float | None:
+        """
+        Waits until the device sets system/lock to op, "lock" or "unlock", inside _system_lock_events(), and returns the
+        monotonic() time that was seen at, or None when it wasn't within timeout seconds. Only events from the
+        monotonic() time since on count, such as the time of the request that makes the device lock. After every
+        SYSTEM_LOCK_EVENT_WAIT seconds without the event the topic is read, for an event that didn't come.
+        """
+        deadline = monotonic() + timeout
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                return None
+            event = ws_api._wait_for_event(
+                self,
+                "system/lock",
+                min(remaining, SYSTEM_LOCK_EVENT_WAIT),
+                match=lambda event: event.data["op"] == op,
+                since=since,
+            )
+            if event is not None:
+                return event.received
+            if self.get_system_lock()["op"] == op:
+                return monotonic()
+
+    def _wait_for_firmware_list(self, before: list[dict[str, Any]], requested: float) -> list[dict[str, Any]]:
+        """
+        Waits until fwupdate/list holds the update server's answer to a getFirmwareList request and returns it, inside
+        _system_lock_events(). before is the list from just before the request, requested the monotonic() time of the
+        request.
 
         The device locks system/lock while it asks the server, unlocks when the request ends and rebuilds the list
         about 0.4 s later, so a read around the unlock can get the previous list, a partial one, or on 5.1.3 none. Until
@@ -2762,15 +2812,18 @@ class ESP500Device(NETIODevice):
         """
         fields = ("name", "version", "downloadUrl", "downloadUrlNoMcu", "releaseNoteEn")
         deadline = perf_counter() + FIRMWARE_LIST_TIMEOUT
-        locked = False
         unlocked_at: float | None = None
+        locked = self._wait_for_system_lock("lock", requested, FIRMWARE_LIST_LOCK_TIMEOUT)
+        if locked is not None:
+            unlocked = self._wait_for_system_lock("unlock", locked, deadline - perf_counter())
+            if unlocked is None:
+                raise CommunicationError(
+                    f"Device {self.host} got no answer from the firmware update server within {FIRMWARE_LIST_TIMEOUT} "
+                    "seconds"
+                )
+            unlocked_at = perf_counter() - (monotonic() - unlocked)
         previous: list[dict[str, Any]] | None = None
         while perf_counter() < deadline:
-            sleep(FIRMWARE_LIST_INTERVAL)
-            if self.get_system_lock()["op"] == "lock":
-                locked = True
-            elif locked and unlocked_at is None:
-                unlocked_at = perf_counter()
             sleep(FIRMWARE_LIST_INTERVAL)
             items = self._get_firmware_list()
             complete = len(items) > 0 and all(field in item for item in items for field in fields)
@@ -2831,7 +2884,11 @@ class ESP500Device(NETIODevice):
         uptime = self.get_uptime()
         sleep(FIRMWARE_LIST_INTERVAL)
         self.logger.info(f"Updating device {self.host} to {offer['name']} from {ws_data['updateFw']}")
-        _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+        with self._system_lock_events():
+            requested = monotonic()
+            _ = ws_api.send_request(self, ws_type, ws_topic, ws_data)
+            if self._wait_for_system_lock("lock", requested, ONLINE_UPDATE_START_TIMEOUT) is None:
+                raise CommunicationError(f"Device {self.host} didn't start the online firmware update")
         self._wait_for_online_update(target, uptime)
 
         if not isinstance(self.netio_manager, NetioManager):
@@ -2847,21 +2904,16 @@ class ESP500Device(NETIODevice):
 
     def _wait_for_online_update(self, target: str, uptime: int) -> None:
         """
-        Waits until the device runs firmware version target after the online update was started. uptime is the
-        device's uptime from just before.
+        Waits until the device runs firmware version target after the online update started, which is when the device
+        locked system/lock. uptime is the device's uptime from just before.
 
-        The device locks system/lock while it downloads and restarts when the download ends, also after a failed one.
-        The firmware is written to try again after the restart, ONLINE_UPDATE_ATTEMPTS attempts in all, but with NETIO
-        Cloud disabled 5.4.0 didn't, so a failed attempt counts as the last one unless the device starts another within
-        ONLINE_UPDATE_RETRY_WAIT seconds. A restart shows as a later boot time worked out from the uptime. A busy
-        device reports its uptime a few seconds late, so the boot time has to move by more than two intervals.
+        The device keeps system/lock locked while it downloads, and restarts when the download ends, also after a
+        failed one. The firmware is written to try again after the restart, ONLINE_UPDATE_ATTEMPTS attempts in all, but
+        with NETIO Cloud disabled 5.4.0 didn't, so a failed attempt counts as the last one unless the device starts
+        another within ONLINE_UPDATE_RETRY_WAIT seconds. A restart shows as a later boot time worked out from the
+        uptime. A busy device reports its uptime a few seconds late, so the boot time has to move by more than two
+        intervals.
         """
-        deadline = perf_counter() + ONLINE_UPDATE_START_TIMEOUT
-        while self.get_system_lock()["op"] != "lock":
-            if perf_counter() >= deadline:
-                raise CommunicationError(f"Device {self.host} didn't start the online firmware update")
-            sleep(FIRMWARE_LIST_INTERVAL)
-
         booted_at = perf_counter() - uptime
         restarts = 0
         deadline = perf_counter() + ONLINE_UPDATE_TIMEOUT

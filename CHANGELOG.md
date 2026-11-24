@@ -9,6 +9,9 @@ and this project uses [PEP 440](https://peps.python.org/pep-0440/) version numbe
 
 ### Changed
 
+- `get_firmware_updates_list()`, `is_update_available()` and `update_firmware_online()` follow the device's
+  `system/lock` by the events it sends instead of reading it five times a second. A check for updates sends about
+  half the requests: 13 instead of 27 on 5.4.0, about 20 instead of 35 to 50 on 5.1.3.
 - The WebSocket connection to 5.x devices is made with `websockets` instead of `websocket-client`, which is no longer
   a dependency. The methods, their arguments and the `ssl_*` arguments of `init_device()` are unchanged. `device.ws`
   and the `ws_connection` argument of the 5.x device classes are now a `PyNetioConf.ESPCore.ws_transport.Connection`,
